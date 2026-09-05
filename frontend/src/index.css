@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Default brand palette (green). Overridden at runtime by whatever color
+   the superadmin picks in Settings - see SettingsContext, which rewrites
+   these same variables via JS on load so every bg-brand-*/text-brand-*
+   class across the app repaints without a rebuild. */
+:root {
+  --brand-50: 240 253 244;
+  --brand-100: 220 252 231;
+  --brand-400: 74 222 128;
+  --brand-500: 34 197 94;
+  --brand-600: 22 163 74;
+  --brand-700: 21 128 61;
+  --brand-900: 20 83 45;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background-color: #f8faf9;
+}
+
+/* Display face used sparingly for headline moments (e.g. the Login page) -
+   everything else in the app stays on the default sans for legibility. */
+.font-display {
+  font-family: 'Fraunces', ui-serif, Georgia, serif;
+  font-optical-sizing: auto;
+}
+
+/* Consistent, accessible focus ring across the app */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgb(var(--brand-600));
+  outline-offset: 2px;
+}
+
+/* Thin, unobtrusive scrollbars for scrollable panels/tables */
+.thin-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--brand-600) / 0.35);
+  border-radius: 9999px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Ensure comfortable minimum touch targets on mobile */
+@media (max-width: 767px) {
+  button,
+  a.btn,
+  input[type='button'],
+  input[type='submit'] {
+    min-height: 40px;
+  }
+}
