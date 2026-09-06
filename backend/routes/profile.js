@@ -18,9 +18,11 @@ const EDITABLE_FIELDS = [
     'emergency_contact_name', 'emergency_contact_address', 'emergency_contact_mobile'
 ];
 
-// DATE columns reject an empty string ("") with a Postgres error — they need
-// an actual NULL when the person leaves the field blank.
-const DATE_FIELDS = ['dob'];
+// DATE and constrained-enum columns reject an empty string ("") with a
+// Postgres error — they need an actual NULL when the person leaves the
+// field blank (gender/civil_status have a CHECK(... IN (...)) constraint
+// that only NULL, not '', satisfies when unset).
+const NULLABLE_ON_EMPTY_FIELDS = ['dob', 'gender', 'civil_status'];
 
 // GET /api/profile - any logged-in user's own profile
 router.get('/', requireAuth, asyncHandler(async (req, res) => {
@@ -39,7 +41,7 @@ router.put('/', requireAuth, asyncHandler(async (req, res) => {
     for (const field of EDITABLE_FIELDS) {
         if (req.body[field] !== undefined) {
             let value = req.body[field];
-            if (DATE_FIELDS.includes(field) && value === '') value = null;
+            if (NULLABLE_ON_EMPTY_FIELDS.includes(field) && value === '') value = null;
             updates.push(`${field} = ?`);
             values.push(value);
         }
