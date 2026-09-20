@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { receiptUpload, csvUpload } = require('../middleware/upload');
+const { deleteCloudinaryFile } = require('../utils/cloudinaryFile');
 const asyncHandler = require('../middleware/asyncHandler');
 const { logActivity } = require('../utils/activityLog');
 const { notifyUser } = require('../utils/notify');
@@ -387,19 +388,39 @@ router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
 
 // PUT /api/inventory/:id - edit asset
 // Body may include apply_to_all_rooms: "1" to update every row sharing the same asset_code, across all rooms
-router.put('/:id', asyncHandler(async (req, res) => {
+// PUT /api/inventory/:id - edit; can also replace/remove the receipt and correct
+// supplier/category (useful since the "same" item name can come from different
+// suppliers/batches per room — see backend/routes/rooms.js generate-items and
+// upsertPurchaseRecord above for how these feed into Purchase Records).
+// NOTE: editing supplier/category/price on a row that has ALREADY produced a
+// Purchase Record (purchase_logged = true) updates the item itself, but does NOT
+// retroactively rewrite that existing Purchase Record — use the pencil/rename
+// tool on the Purchase Records page for that, or edit the record there directly.
+router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (req, res) => {
     const {
         asset_name, description, purchase_date, purchase_price,
-        working, for_repair, non_working, salvage, repair_reason, apply_to_all_rooms
+        working, for_repair, non_working, salvage, repair_reason, apply_to_all_rooms,
+        supplier, category, remove_receipt
     } = req.body;
 
-    const [rows] = await pool.query('SELECT asset_code, for_repair, repair_flagged_at, purchase_logged, supplier, category, receipt_image FROM inventory WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
+    const [rows] = await pool.query('SELECT asset_code, for_repair, repair_flagged_at, purchase_logged, receipt_image FROM inventory WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Asset not found.' });
 
     const newForRepair = Number(for_repair) || 0;
     const newPrice = Number(purchase_price) || 0;
     // Units on this row after the edit — used to size a first-time purchase log below.
     const perRoomQty = (Number(working) || 0) + (Number(for_repair) || 0) + (Number(non_working) || 0) + (Number(salvage) || 0);
+
+    // Same replace/remove pattern as records.js: a new file replaces the old one
+    // (deleting it from Cloudinary), or remove_receipt clears it with no replacement.
+    let receiptPath = rows[0].receipt_image;
+    if (req.file) {
+        if (receiptPath) deleteCloudinaryFile(receiptPath).catch((err) => console.error('Failed to delete old receipt:', err));
+        receiptPath = req.file.path;
+    } else if (remove_receipt === '1' || remove_receipt === true) {
+        if (receiptPath) deleteCloudinaryFile(receiptPath).catch((err) => console.error('Failed to delete old receipt:', err));
+        receiptPath = null;
+    }
 
     if (apply_to_all_rooms === '1' || apply_to_all_rooms === true) {
         // Rows that have never produced a Purchase Record yet — if this edit is the
@@ -412,22 +433,22 @@ router.put('/:id', asyncHandler(async (req, res) => {
         );
         const unloggedIds = unlogged.map(r => r.id);
 
-        // Every room sharing this asset_code gets the same new counts, but each
-        // row's repair clock is handled individually in SQL: start it only for
-        // rows where it isn't already running, clear it wherever repair count
-        // drops back to 0.
+        // Every room sharing this asset_code gets the same new counts/supplier/category,
+        // but each row's repair clock is handled individually in SQL: start it only for
+        // rows where it isn't already running, clear it wherever repair count drops to 0.
         const [result] = await pool.query(
             `UPDATE inventory SET asset_name=?, description=?, purchase_date=?, purchase_price=?,
-             working=?, for_repair=?, non_working=?, salvage=?, repair_reason=?,
+             working=?, for_repair=?, non_working=?, salvage=?, repair_reason=?, supplier=?, category=?, receipt_image=?,
              repair_flagged_at = CASE WHEN ?::int > 0 THEN COALESCE(repair_flagged_at, NOW()) ELSE NULL END
              WHERE asset_code = ? AND deleted_at IS NULL`,
-            [asset_name, description, purchase_date, purchase_price, working, for_repair, non_working, salvage, repair_reason, newForRepair, rows[0].asset_code]
+            [asset_name, description, purchase_date, purchase_price, working, for_repair, non_working, salvage, repair_reason,
+                supplier || null, category || null, receiptPath, newForRepair, rows[0].asset_code]
         );
 
         if (newPrice > 0 && unloggedIds.length > 0) {
             const newRecordsId = await upsertPurchaseRecord({
                 itemName: asset_name, qty: Math.max(perRoomQty * unloggedIds.length, 1), purchaseDate: purchase_date,
-                price: newPrice, supplier: rows[0].supplier, category: rows[0].category, receiptPath: rows[0].receipt_image
+                price: newPrice, supplier, category, receiptPath
             });
             await pool.query(
                 `UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id IN (${unloggedIds.map(() => '?').join(',')})`,
@@ -448,15 +469,16 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
     await pool.query(
         `UPDATE inventory SET asset_name=?, description=?, purchase_date=?, purchase_price=?,
-         working=?, for_repair=?, non_working=?, salvage=?, repair_reason=?, repair_flagged_at=? WHERE id=?`,
-        [asset_name, description, purchase_date, purchase_price, working, for_repair, non_working, salvage, repair_reason, repairFlaggedAt, req.params.id]
+         working=?, for_repair=?, non_working=?, salvage=?, repair_reason=?, supplier=?, category=?, receipt_image=?, repair_flagged_at=? WHERE id=?`,
+        [asset_name, description, purchase_date, purchase_price, working, for_repair, non_working, salvage, repair_reason,
+            supplier || null, category || null, receiptPath, repairFlaggedAt, req.params.id]
     );
 
     // First time this specific row gets a real price — log it once, then never again.
     if (newPrice > 0 && rows[0].purchase_logged !== true) {
         const newRecordsId = await upsertPurchaseRecord({
             itemName: asset_name, qty: Math.max(perRoomQty, 1), purchaseDate: purchase_date,
-            price: newPrice, supplier: rows[0].supplier, category: rows[0].category, receiptPath: rows[0].receipt_image
+            price: newPrice, supplier, category, receiptPath
         });
         await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [newRecordsId, req.params.id]);
     }

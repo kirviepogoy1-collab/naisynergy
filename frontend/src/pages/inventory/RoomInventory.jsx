@@ -51,6 +51,8 @@ export default function RoomInventory() {
     // on the Add Item form, so repeat entries can be picked instead of retyped.
     const [lookup, setLookup] = useState({ suppliers: [], categories: [] });
     const receiptRef = useRef();
+    const [existingReceipt, setExistingReceipt] = useState(null); // receipt already on the item being edited
+    const [removeReceipt, setRemoveReceipt] = useState(false);
 
     async function loadLookup() {
         try {
@@ -80,11 +82,14 @@ export default function RoomInventory() {
 
     function startEdit(item) {
         setEditingId(item.id);
+        setExistingReceipt(item.receipt_image || null);
+        setRemoveReceipt(false);
         setForm({
             asset_code: item.asset_code, asset_name: item.asset_name, description: item.description || '',
             purchase_date: item.purchase_date || '', purchase_price: item.purchase_price,
             working: item.working, for_repair: item.for_repair, non_working: item.non_working, salvage: item.salvage,
-            repair_reason: item.repair_reason || '', apply_to_all_rooms: false, supplier: '', category: ''
+            repair_reason: item.repair_reason || '', apply_to_all_rooms: false,
+            supplier: item.supplier || '', category: item.category || ''
         });
         setShowForm(true);
     }
@@ -92,6 +97,8 @@ export default function RoomInventory() {
     function resetForm() {
         setForm(EMPTY_FORM);
         setEditingId(null);
+        setExistingReceipt(null);
+        setRemoveReceipt(false);
         if (receiptRef.current) receiptRef.current.value = '';
         setShowForm(false);
     }
@@ -99,16 +106,16 @@ export default function RoomInventory() {
     async function handleSubmit(e) {
         e.preventDefault();
         try {
+            const formData = new FormData();
+            Object.entries(form).forEach(([k, v]) => {
+                formData.append(k, k === 'apply_to_all_rooms' ? (v ? '1' : '0') : v);
+            });
+            if (receiptRef.current?.files[0]) formData.append('receipt_image', receiptRef.current.files[0]);
             if (editingId) {
-                // PUT doesn't take a receipt file (see backend/routes/inventory.js) — plain JSON.
-                await api.put(`/inventory/${editingId}`, { ...form, apply_to_all_rooms: form.apply_to_all_rooms ? '1' : '0' });
+                if (removeReceipt) formData.append('remove_receipt', '1');
+                await api.put(`/inventory/${editingId}`, formData);
             } else {
-                const formData = new FormData();
-                Object.entries(form).forEach(([k, v]) => {
-                    formData.append(k, k === 'apply_to_all_rooms' ? (v ? '1' : '0') : v);
-                });
                 formData.append('room_code', roomCode);
-                if (receiptRef.current?.files[0]) formData.append('receipt_image', receiptRef.current.files[0]);
                 await api.post('/inventory', formData);
             }
             Swal.fire('Success', 'Saved.', 'success');
@@ -251,34 +258,43 @@ export default function RoomInventory() {
                         </div>
                     ))}
 
+                    <div>
+                        <input
+                            list="supplier-options" placeholder="Supplier (optional)" value={form.supplier}
+                            onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="p-2 border rounded w-full"
+                        />
+                        <datalist id="supplier-options">
+                            {lookup.suppliers.map((s) => <option key={s} value={s} />)}
+                        </datalist>
+                    </div>
+                    <div>
+                        <input
+                            list="category-options" placeholder="Category (optional)" value={form.category}
+                            onChange={(e) => setForm({ ...form, category: e.target.value })} className="p-2 border rounded w-full"
+                        />
+                        <datalist id="category-options">
+                            {lookup.categories.map((c) => <option key={c} value={c} />)}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label className="text-xs text-gray-500">Receipt (optional)</label>
+                        <input type="file" accept="image/*,.pdf" ref={receiptRef} className="p-2 border rounded w-full text-sm" />
+                        {editingId && existingReceipt && !removeReceipt && (
+                            <label className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+                                <input type="checkbox" checked={removeReceipt} onChange={(e) => setRemoveReceipt(e.target.checked)} />
+                                Remove current receipt
+                            </label>
+                        )}
+                    </div>
                     {!editingId && (
-                        <>
-                            <div>
-                                <input
-                                    list="supplier-options" placeholder="Supplier (optional)" value={form.supplier}
-                                    onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="p-2 border rounded w-full"
-                                />
-                                <datalist id="supplier-options">
-                                    {lookup.suppliers.map((s) => <option key={s} value={s} />)}
-                                </datalist>
-                            </div>
-                            <div>
-                                <input
-                                    list="category-options" placeholder="Category (optional)" value={form.category}
-                                    onChange={(e) => setForm({ ...form, category: e.target.value })} className="p-2 border rounded w-full"
-                                />
-                                <datalist id="category-options">
-                                    {lookup.categories.map((c) => <option key={c} value={c} />)}
-                                </datalist>
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-500">Receipt (optional)</label>
-                                <input type="file" accept="image/*,.pdf" ref={receiptRef} className="p-2 border rounded w-full text-sm" />
-                            </div>
-                            <p className="text-xs text-gray-500 sm:col-span-2 lg:col-span-3 -mt-2">
-                                Purchase Price is required so this logs as a Purchase Record right away — no need to come back and edit it in per room later. Supplier, Category, and Receipt help fill that entry out but aren't required.
-                            </p>
-                        </>
+                        <p className="text-xs text-gray-500 sm:col-span-2 lg:col-span-3 -mt-2">
+                            Purchase Price is required so this logs as a Purchase Record right away — no need to come back and edit it in per room later. Supplier, Category, and Receipt help fill that entry out but aren't required.
+                        </p>
+                    )}
+                    {editingId && (
+                        <p className="text-xs text-gray-500 sm:col-span-2 lg:col-span-3 -mt-2">
+                            Changing Supplier/Category/Receipt here updates this item, but won't retroactively change a Purchase Record already created from it — edit that directly on the Purchase Records page if needed.
+                        </p>
                     )}
 
 
