@@ -101,14 +101,19 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 
 // POST /api/rooms/code/:room_code/generate-items
 // Bulk-seed shortcut (TAG-05): for every distinct asset_code that exists anywhere in inventory,
-// insert a zero-count row into this room if it doesn't already have that asset code.
+// insert a zero-count row into this room if it doesn't already have that asset code. Carries
+// over supplier/category from the most recent existing row with that asset_code (see
+// routes/inventory.js) so that when someone later edits this placeholder to add a real count
+// and price, it has a fighting chance of matching an existing Purchase Record exactly and
+// merging into it instead of creating a second, differently-labeled entry for the same item.
 router.post('/code/:room_code/generate-items', asyncHandler(async (req, res) => {
     const roomCode = req.params.room_code;
     const [roomRows] = await pool.query('SELECT room_code FROM rooms WHERE room_code = ?', [roomCode]);
     if (!roomRows[0]) return res.status(404).json({ error: 'Room not found.' });
 
     const [allAssets] = await pool.query(
-        'SELECT DISTINCT asset_code, asset_name, description FROM inventory'
+        `SELECT DISTINCT ON (asset_code) asset_code, asset_name, description, supplier, category
+         FROM inventory ORDER BY asset_code, created_at DESC`
     );
     const [existing] = await pool.query('SELECT asset_code FROM inventory WHERE room_code = ?', [roomCode]);
     const existingCodes = new Set(existing.map(r => r.asset_code));
@@ -117,9 +122,9 @@ router.post('/code/:room_code/generate-items', asyncHandler(async (req, res) => 
     for (const asset of allAssets) {
         if (existingCodes.has(asset.asset_code)) continue;
         await pool.query(
-            `INSERT INTO inventory (room_code, asset_code, asset_name, description, working, for_repair, non_working, salvage)
-             VALUES (?, ?, ?, ?, 0, 0, 0, 0)`,
-            [roomCode, asset.asset_code, asset.asset_name, asset.description]
+            `INSERT INTO inventory (room_code, asset_code, asset_name, description, working, for_repair, non_working, salvage, supplier, category)
+             VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`,
+            [roomCode, asset.asset_code, asset.asset_name, asset.description, asset.supplier, asset.category]
         );
         inserted++;
     }

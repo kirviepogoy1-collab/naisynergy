@@ -176,7 +176,12 @@ CREATE TABLE inventory (
     -- `records` is defined further below in this same file; the real FK
     -- constraint gets added automatically by inventory.js's self-migration
     -- the first time the backend starts against this database).
-    records_id INT NULL
+    records_id INT NULL,
+    -- Persisted so "Generate Items" can copy them into a new room's placeholder
+    -- row, and so a price added later via edit has something to log the
+    -- purchase record with (see backend/routes/inventory.js upsertPurchaseRecord).
+    supplier VARCHAR(150) NULL,
+    category VARCHAR(100) NULL
 );
 
 -- ============================================================

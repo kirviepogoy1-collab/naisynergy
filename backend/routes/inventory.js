@@ -29,6 +29,11 @@ const migrationsReady = (async () => {
         // (and remove the purchase record entirely if that brings it to 0),
         // instead of guessing which purchase a deleted item belonged to.
         await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS records_id INT NULL REFERENCES records(id) ON DELETE SET NULL');
+        // Persisted (not just used-once-at-creation-and-forgotten) so "Generate
+        // Items" can copy them into a new room's placeholder row, and so a price
+        // added later via edit has something to log the purchase record with.
+        await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier VARCHAR(150) NULL');
+        await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS category VARCHAR(100) NULL');
     } catch (err) {
         console.error('Failed to migrate inventory table:', err.message);
     }
@@ -36,6 +41,35 @@ const migrationsReady = (async () => {
 
 router.use(requireAuth);
 router.use(asyncHandler(async (req, res, next) => { await migrationsReady; next(); }));
+
+// Logs a purchase, merging into an already-matching Purchase Record instead of
+// creating a duplicate — e.g. the same item, same supplier/category, same
+// price, same date, showing up again later (like a "Generate Items" placeholder
+// finally getting priced in) should add onto the one purchase, not fork a
+// second line that looks like a separate buy. Returns the records.id the
+// quantity ended up in, so the calling inventory row(s) can link to it.
+async function upsertPurchaseRecord({ itemName, qty, purchaseDate, price, supplier, category, receiptPath }) {
+    const [match] = await pool.query(
+        `SELECT id, quantity FROM records
+         WHERE item_name = ? AND purchase_price = ?
+           AND purchase_date IS NOT DISTINCT FROM ?
+           AND supplier IS NOT DISTINCT FROM ?
+           AND category IS NOT DISTINCT FROM ?
+         LIMIT 1`,
+        [itemName, price, purchaseDate || null, supplier || null, category || null]
+    );
+    if (match[0]) {
+        const newQty = Number(match[0].quantity) + qty;
+        await pool.query('UPDATE records SET quantity = ? WHERE id = ?', [newQty, match[0].id]);
+        return match[0].id;
+    }
+    const [r] = await pool.query(
+        `INSERT INTO records (item_name, quantity, purchase_date, purchase_price, supplier, category, receipt_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [itemName, qty, purchaseDate || null, price, supplier || null, category || null, receiptPath || null]
+    );
+    return r.insertId;
+}
 
 // GET /api/inventory - list assets, optional filters (room_code, search, status)
 router.get('/', asyncHandler(async (req, res) => {
@@ -249,13 +283,16 @@ router.use(requireRole('superadmin', 'inventory_staff'));
 // POST /api/inventory - create asset (with optional receipt image)
 // Body may include apply_to_all_rooms: "1" to add this same asset_code to every room that doesn't have it yet
 //
-// Auto-linked Purchase Record (see backend/routes/records.js): when purchase_price is
-// provided, this also inserts ONE row into `records` for the whole action — not one per
-// room — so checking "apply to all rooms" across N rooms logs a single purchase of N
-// units, not N separate purchases. supplier/category are optional and only used to fill
-// that record; they aren't columns on `inventory` itself. Editing an existing item (PUT
-// below) never touches `records` — only a brand-new item creates a purchase entry, so
-// correcting counts/price later doesn't re-log a purchase that didn't happen again.
+// Auto-linked Purchase Record (see backend/routes/records.js): purchase_price is now
+// required, so every fresh item always logs one right away — no more "add without a
+// price, forget to log it, find out later." supplier/category are saved ON the
+// inventory row too (not just used-once), so "Generate Items" (see routes/rooms.js) can
+// carry them into a new room's placeholder, and a price added later via edit still has
+// something to log with. Checking "apply to all rooms" across N rooms logs a single
+// purchase of N units, not N separate purchases — and if an identical purchase (same
+// item/supplier/category/price/date) already exists, this adds onto it instead of
+// creating a duplicate line, so a generated placeholder priced in later merges back into
+// the original purchase rather than forking into a second one.
 router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
     try {
         const {
@@ -277,22 +314,13 @@ router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
         // that came in already needing service).
         const repairFlaggedAt = (Number(for_repair) || 0) > 0 ? new Date().toISOString() : null;
         const values = [description || null, purchase_date || null, purchase_price || 0,
-            working || 0, for_repair || 0, non_working || 0, salvage || 0, repair_reason || null, receiptPath, repairFlaggedAt];
+            working || 0, for_repair || 0, non_working || 0, salvage || 0, repair_reason || null, receiptPath, repairFlaggedAt,
+            supplier || null, category || null];
 
         // Units per room, used both for the inventory row and to size the
         // auto-logged purchase quantity below.
         const perRoomQty = (Number(working) || 0) + (Number(for_repair) || 0) + (Number(non_working) || 0) + (Number(salvage) || 0);
-
-        async function logPurchaseRecord(totalQty) {
-            const price = Number(purchase_price) || 0;
-            if (price <= 0) return null; // no price entered — nothing to log as a purchase
-            const [r] = await pool.query(
-                `INSERT INTO records (item_name, quantity, purchase_date, purchase_price, supplier, category, receipt_path)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [asset_name, Math.max(totalQty, 1), purchase_date || null, price, supplier || null, category || null, receiptPath]
-            );
-            return r.insertId; // the new records.id, so the row(s) that caused it can point back to it
-        }
+        const price = Number(purchase_price) || 0;
 
         if (apply_to_all_rooms === '1' || apply_to_all_rooms === true) {
             // Insert into every room that doesn't already have this asset_code; report skipped rooms
@@ -309,16 +337,19 @@ router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
                 }
                 const [result] = await pool.query(
                     `INSERT INTO inventory (room_code, asset_code, asset_name, description, purchase_date,
-                     purchase_price, working, for_repair, non_working, salvage, repair_reason, receipt_image, repair_flagged_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                     purchase_price, working, for_repair, non_working, salvage, repair_reason, receipt_image, repair_flagged_at, supplier, category)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [room.room_code, asset_code, asset_name, ...values]
                 );
                 insertedIds.push(result.insertId);
             }
             const inserted = insertedIds.length;
             // One purchase record for the whole batch, quantity = per-room units x rooms actually inserted.
-            const newRecordsId = await logPurchaseRecord(perRoomQty * inserted);
-            if (newRecordsId && insertedIds.length > 0) {
+            const newRecordsId = await upsertPurchaseRecord({
+                itemName: asset_name, qty: Math.max(perRoomQty * inserted, 1), purchaseDate: purchase_date,
+                price, supplier, category, receiptPath
+            });
+            if (insertedIds.length > 0) {
                 await pool.query(
                     `UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id IN (${insertedIds.map(() => '?').join(',')})`,
                     [newRecordsId, ...insertedIds]
@@ -336,14 +367,15 @@ router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
 
         const [result] = await pool.query(
             `INSERT INTO inventory (room_code, asset_code, asset_name, description, purchase_date,
-             purchase_price, working, for_repair, non_working, salvage, repair_reason, receipt_image, repair_flagged_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             purchase_price, working, for_repair, non_working, salvage, repair_reason, receipt_image, repair_flagged_at, supplier, category)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [room_code, asset_code, asset_name, ...values]
         );
-        const newRecordsId = await logPurchaseRecord(perRoomQty);
-        if (newRecordsId) {
-            await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [newRecordsId, result.insertId]);
-        }
+        const newRecordsId = await upsertPurchaseRecord({
+            itemName: asset_name, qty: Math.max(perRoomQty, 1), purchaseDate: purchase_date,
+            price, supplier, category, receiptPath
+        });
+        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [newRecordsId, result.insertId]);
 
         logActivity(req.user.id, 'asset_create', null, `Added ${asset_name} (${asset_code}) to room ${room_code}`, 'inventory');
         res.status(201).json({ message: 'Asset added.', id: result.insertId });
@@ -361,7 +393,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
         working, for_repair, non_working, salvage, repair_reason, apply_to_all_rooms
     } = req.body;
 
-    const [rows] = await pool.query('SELECT asset_code, for_repair, repair_flagged_at, purchase_logged FROM inventory WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
+    const [rows] = await pool.query('SELECT asset_code, for_repair, repair_flagged_at, purchase_logged, supplier, category, receipt_image FROM inventory WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Asset not found.' });
 
     const newForRepair = Number(for_repair) || 0;
@@ -393,14 +425,13 @@ router.put('/:id', asyncHandler(async (req, res) => {
         );
 
         if (newPrice > 0 && unloggedIds.length > 0) {
-            const [r] = await pool.query(
-                `INSERT INTO records (item_name, quantity, purchase_date, purchase_price)
-                 VALUES (?, ?, ?, ?)`,
-                [asset_name, Math.max(perRoomQty * unloggedIds.length, 1), purchase_date || null, newPrice]
-            );
+            const newRecordsId = await upsertPurchaseRecord({
+                itemName: asset_name, qty: Math.max(perRoomQty * unloggedIds.length, 1), purchaseDate: purchase_date,
+                price: newPrice, supplier: rows[0].supplier, category: rows[0].category, receiptPath: rows[0].receipt_image
+            });
             await pool.query(
                 `UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id IN (${unloggedIds.map(() => '?').join(',')})`,
-                [r.insertId, ...unloggedIds]
+                [newRecordsId, ...unloggedIds]
             );
         }
 
@@ -423,12 +454,11 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
     // First time this specific row gets a real price — log it once, then never again.
     if (newPrice > 0 && rows[0].purchase_logged !== true) {
-        const [r] = await pool.query(
-            `INSERT INTO records (item_name, quantity, purchase_date, purchase_price)
-             VALUES (?, ?, ?, ?)`,
-            [asset_name, Math.max(perRoomQty, 1), purchase_date || null, newPrice]
-        );
-        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [r.insertId, req.params.id]);
+        const newRecordsId = await upsertPurchaseRecord({
+            itemName: asset_name, qty: Math.max(perRoomQty, 1), purchaseDate: purchase_date,
+            price: newPrice, supplier: rows[0].supplier, category: rows[0].category, receiptPath: rows[0].receipt_image
+        });
+        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [newRecordsId, req.params.id]);
     }
 
     logActivity(req.user.id, 'asset_update', null, `Updated ${asset_name} (${rows[0].asset_code})`, 'inventory');
