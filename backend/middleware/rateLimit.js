@@ -43,10 +43,13 @@ function makeLimiter({ windowMinutes, max, prefix, message }) {
     });
 }
 
-// General baseline abuse guard across the whole API.
+// General baseline abuse guard across the whole API. Local development gets a
+// much higher ceiling — hot-reloads, notification polling, and repeated
+// manual testing on one machine burn through requests far faster than a real
+// user ever would, and 300/15min was tripping constantly during dev.
 const apiLimiter = makeLimiter({
     windowMinutes: 15,
-    max: 300,
+    max: process.env.NODE_ENV === 'production' ? 300 : 3000,
     prefix: 'api',
     message: 'Too many requests. Please slow down and try again shortly.'
 });
