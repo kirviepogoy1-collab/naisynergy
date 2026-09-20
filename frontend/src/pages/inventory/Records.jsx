@@ -27,8 +27,40 @@ export default function Records() {
     const [removeReceipt, setRemoveReceipt] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
     const [selected, setSelected] = useState([]);
+    const [showManage, setShowManage] = useState(false);
+    const [lookup, setLookup] = useState({ suppliers: [], categories: [] });
     const fileRef = useRef();
     const { pageItems: pagedRecords, page, setPage, totalPages } = usePagination(records, 15);
+
+    async function loadLookup() {
+        try {
+            const res = await api.get('/records/meta/lookup');
+            setLookup(res.data);
+        } catch {
+            // Non-critical — the Manage panel just shows nothing to fix yet.
+        }
+    }
+
+    async function renameValue(field, oldValue) {
+        const { value: newValue } = await Swal.fire({
+            title: `Rename this ${field}`,
+            input: 'text',
+            inputValue: oldValue,
+            inputLabel: `Every record currently using "${oldValue}" will be updated.`,
+            showCancelButton: true,
+            confirmButtonColor: '#16a34a',
+            inputValidator: (v) => (!v || !v.trim() ? 'Enter a value.' : undefined)
+        });
+        if (!newValue || newValue.trim() === oldValue) return;
+        try {
+            const res = await api.put('/records/meta/rename', { field, old_value: oldValue, new_value: newValue.trim() });
+            Swal.fire('Updated', res.data.message, 'success');
+            load();
+            loadLookup();
+        } catch (err) {
+            Swal.fire('Error', err.response?.data?.error || 'Failed to rename.', 'error');
+        }
+    }
 
     async function load() {
         const [recordsRes, statsRes] = await Promise.all([
@@ -56,6 +88,7 @@ export default function Records() {
     }
 
     useEffect(() => { load(); }, [search, category, startDate, endDate]);
+    useEffect(() => { loadLookup(); }, []);
 
     function resetForm() {
         setForm(EMPTY_FORM);
@@ -169,7 +202,17 @@ export default function Records() {
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-2">Category</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
+                            Category
+                            {canManage && (
+                                <button
+                                    type="button" onClick={() => setShowManage(true)} title="Fix a misspelled or inconsistently-cased category/supplier"
+                                    className="text-slate-400 hover:text-slate-700"
+                                >
+                                    <Pencil className="w-3 h-3" />
+                                </button>
+                            )}
+                        </label>
                         <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-3 border rounded-lg">
                             <option value="">All Categories</option>
                             {stats?.by_category?.map((cat) => (
@@ -233,6 +276,42 @@ export default function Records() {
                         <button type="button" onClick={resetForm} className="bg-gray-200 text-gray-700 rounded-lg px-5 py-3 font-semibold hover:bg-gray-300">Cancel</button>
                     </div>
                 </form>
+            </Modal>
+
+            <Modal open={showManage} onClose={() => setShowManage(false)} title="Fix Supplier / Category Spelling" maxWidth="max-w-lg">
+                <p className="text-sm text-slate-500 mb-4">
+                    Click the pencil next to a value to rename it everywhere it's used — handy for merging duplicates like "furniture" and "Furniture" into one.
+                </p>
+                <div className="space-y-5">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Categories</p>
+                        {lookup.categories.length === 0 && <p className="text-sm text-slate-400">None yet.</p>}
+                        <ul className="divide-y divide-slate-100 border rounded-lg">
+                            {lookup.categories.map((c) => (
+                                <li key={c} className="flex items-center justify-between px-3 py-2 text-sm">
+                                    <span>{c}</span>
+                                    <button type="button" onClick={() => renameValue('category', c)} className="text-slate-400 hover:text-slate-700" title="Rename">
+                                        <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Suppliers</p>
+                        {lookup.suppliers.length === 0 && <p className="text-sm text-slate-400">None yet.</p>}
+                        <ul className="divide-y divide-slate-100 border rounded-lg">
+                            {lookup.suppliers.map((s) => (
+                                <li key={s} className="flex items-center justify-between px-3 py-2 text-sm">
+                                    <span>{s}</span>
+                                    <button type="button" onClick={() => renameValue('supplier', s)} className="text-slate-400 hover:text-slate-700" title="Rename">
+                                        <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
             </Modal>
 
             {canManage && selected.length > 0 && (

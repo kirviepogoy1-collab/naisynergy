@@ -30,6 +30,22 @@ router.get('/', asyncHandler(async (req, res) => {
     res.json(rows);
 }));
 
+// GET /api/records/meta/lookup - distinct supplier/category values already on file,
+// used to power the Supplier/Category dropdown-with-free-text on the Room Inventory
+// "Add Item" form (and here) so repeat entries don't have to be retyped every time.
+router.get('/meta/lookup', asyncHandler(async (req, res) => {
+    const [suppliers] = await pool.query(
+        `SELECT DISTINCT supplier FROM records WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier`
+    );
+    const [categories] = await pool.query(
+        `SELECT DISTINCT category FROM records WHERE category IS NOT NULL AND category != '' ORDER BY category`
+    );
+    res.json({
+        suppliers: suppliers.map(r => r.supplier),
+        categories: categories.map(r => r.category)
+    });
+}));
+
 // GET /api/records/stats - built-in stats cards (TAG-09)
 router.get('/stats/summary', asyncHandler(async (req, res) => {
     const [[thisMonth]] = await pool.query(`
@@ -115,6 +131,27 @@ router.get('/export', asyncHandler(async (req, res) => {
 
 // Everything below is inventory staff / superadmin only
 router.use(requireRole('superadmin', 'inventory_staff'));
+
+// PUT /api/records/meta/rename - bulk-fix a supplier/category spelling or
+// capitalization across every record that has it (e.g. "furniture" and
+// "Furniture" ending up as two separate values by accident). Also touches
+// any inventory-triggered purchase records the same way, since they land in
+// this same table.
+router.put('/meta/rename', asyncHandler(async (req, res) => {
+    const { field, old_value, new_value } = req.body;
+    if (!['supplier', 'category'].includes(field)) {
+        return res.status(400).json({ error: 'field must be "supplier" or "category".' });
+    }
+    if (!old_value || !new_value || !new_value.trim()) {
+        return res.status(400).json({ error: 'old_value and new_value are required.' });
+    }
+    const [result] = await pool.query(
+        `UPDATE records SET ${field} = ? WHERE ${field} = ?`,
+        [new_value.trim(), old_value]
+    );
+    logActivity(req.user.id, 'record_rename', null, `Renamed ${field} "${old_value}" to "${new_value.trim()}" (${result.affectedRows} record(s))`, 'inventory');
+    res.json({ message: `Updated ${result.affectedRows} record(s).`, affected: result.affectedRows });
+}));
 
 // POST /api/records - create a purchase record, optional receipt (image or PDF, 5MB cap per docs)
 router.post('/', receiptUpload.single('receipt'), asyncHandler(async (req, res) => {

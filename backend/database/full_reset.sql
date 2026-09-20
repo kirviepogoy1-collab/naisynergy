@@ -166,7 +166,17 @@ CREATE TABLE inventory (
     deleted_by INT NULL REFERENCES users(id) ON DELETE SET NULL,
     -- Repair aging: set the moment for_repair goes from 0 -> >0, cleared when
     -- it returns to 0. Powers the "in repair for N days" watch list.
-    repair_flagged_at TIMESTAMP NULL
+    repair_flagged_at TIMESTAMP NULL,
+    -- True once this row has produced a matching row in `records` (see
+    -- backend/routes/inventory.js). A row can be created with no price and
+    -- priced in later via edit — the first time that happens it logs a
+    -- purchase, but only once ever, so later corrections don't re-log it.
+    purchase_logged BOOLEAN DEFAULT FALSE,
+    -- Which records.id this row's units are counted in (no inline FK here —
+    -- `records` is defined further below in this same file; the real FK
+    -- constraint gets added automatically by inventory.js's self-migration
+    -- the first time the backend starts against this database).
+    records_id INT NULL
 );
 
 -- ============================================================

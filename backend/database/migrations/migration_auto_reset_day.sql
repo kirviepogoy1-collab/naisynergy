@@ -1,13 +1,4 @@
--- ============================================================
--- Migration: let each leave type auto-reset on any day of the
--- month, not just the 1st (adds leave_types.auto_reset_day).
---
--- NOT required to run by hand - backend/utils/leaveBalance.js
--- already does this same ALTER TABLE automatically on startup.
--- Only run this if you'd rather apply it yourself first.
---
--- Neon dashboard -> SQL Editor -> paste this -> Run
--- ============================================================
+
 
 ALTER TABLE leave_types
     ADD COLUMN IF NOT EXISTS auto_reset_day SMALLINT NULL CHECK (auto_reset_day BETWEEN 1 AND 31);

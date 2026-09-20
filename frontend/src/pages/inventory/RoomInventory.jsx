@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus, RefreshCw, Pencil, Trash2, MessageSquare, Send } from 'lucide-react';
@@ -12,7 +12,8 @@ import { formatDateTime } from '../../utils/formatDate';
 
 const EMPTY_FORM = {
     asset_code: '', asset_name: '', description: '', purchase_date: '', purchase_price: '',
-    working: 0, for_repair: 0, non_working: 0, salvage: 0, repair_reason: '', apply_to_all_rooms: false
+    working: 0, for_repair: 0, non_working: 0, salvage: 0, repair_reason: '', apply_to_all_rooms: false,
+    supplier: '', category: ''
 };
 
 function Badge({ value, color }) {
@@ -46,6 +47,20 @@ export default function RoomInventory() {
     const [newComment, setNewComment] = useState('');
     const [commentsLoading, setCommentsLoading] = useState(false);
 
+    // Existing Supplier/Category values (from Purchase Records) shown as suggestions
+    // on the Add Item form, so repeat entries can be picked instead of retyped.
+    const [lookup, setLookup] = useState({ suppliers: [], categories: [] });
+    const receiptRef = useRef();
+
+    async function loadLookup() {
+        try {
+            const res = await api.get('/records/meta/lookup');
+            setLookup(res.data);
+        } catch {
+            // Non-critical — the fields still work as free-text without suggestions.
+        }
+    }
+
     async function load() {
         const [roomRes, itemsRes] = await Promise.all([
             api.get(`/rooms/code/${roomCode}`),
@@ -61,6 +76,7 @@ export default function RoomInventory() {
     }
 
     useEffect(() => { load(); }, [roomCode, search, status]);
+    useEffect(() => { loadLookup(); }, []);
 
     function startEdit(item) {
         setEditingId(item.id);
@@ -68,7 +84,7 @@ export default function RoomInventory() {
             asset_code: item.asset_code, asset_name: item.asset_name, description: item.description || '',
             purchase_date: item.purchase_date || '', purchase_price: item.purchase_price,
             working: item.working, for_repair: item.for_repair, non_working: item.non_working, salvage: item.salvage,
-            repair_reason: item.repair_reason || '', apply_to_all_rooms: false
+            repair_reason: item.repair_reason || '', apply_to_all_rooms: false, supplier: '', category: ''
         });
         setShowForm(true);
     }
@@ -76,6 +92,7 @@ export default function RoomInventory() {
     function resetForm() {
         setForm(EMPTY_FORM);
         setEditingId(null);
+        if (receiptRef.current) receiptRef.current.value = '';
         setShowForm(false);
     }
 
@@ -83,13 +100,21 @@ export default function RoomInventory() {
         e.preventDefault();
         try {
             if (editingId) {
+                // PUT doesn't take a receipt file (see backend/routes/inventory.js) — plain JSON.
                 await api.put(`/inventory/${editingId}`, { ...form, apply_to_all_rooms: form.apply_to_all_rooms ? '1' : '0' });
             } else {
-                await api.post('/inventory', { ...form, room_code: roomCode, apply_to_all_rooms: form.apply_to_all_rooms ? '1' : '0' });
+                const formData = new FormData();
+                Object.entries(form).forEach(([k, v]) => {
+                    formData.append(k, k === 'apply_to_all_rooms' ? (v ? '1' : '0') : v);
+                });
+                formData.append('room_code', roomCode);
+                if (receiptRef.current?.files[0]) formData.append('receipt_image', receiptRef.current.files[0]);
+                await api.post('/inventory', formData);
             }
             Swal.fire('Success', 'Saved.', 'success');
             resetForm();
             load();
+            loadLookup(); // pick up any new supplier/category just typed in
         } catch (err) {
             Swal.fire('Error', err.response?.data?.error || 'Failed to save asset.', 'error');
         }
@@ -216,7 +241,7 @@ export default function RoomInventory() {
                     <input required placeholder="Asset Name" value={form.asset_name} onChange={(e) => setForm({ ...form, asset_name: e.target.value })} className="p-2 border rounded" />
                     <input placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="p-2 border rounded" />
                     <input type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} className="p-2 border rounded" />
-                    <input type="number" step="0.01" placeholder="Purchase Price" value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} className="p-2 border rounded" />
+                    <input type="number" step="0.01" min="0.01" required={!editingId} placeholder={editingId ? 'Purchase Price' : 'Purchase Price (required)'} value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} className="p-2 border rounded" />
                     <input placeholder="Repair Reason (optional)" value={form.repair_reason} onChange={(e) => setForm({ ...form, repair_reason: e.target.value })} className="p-2 border rounded" />
 
                     {['working', 'for_repair', 'non_working', 'salvage'].map((f) => (
@@ -225,6 +250,37 @@ export default function RoomInventory() {
                             <input type="number" min="0" value={form[f]} onChange={(e) => setForm({ ...form, [f]: e.target.value })} className="p-2 border rounded w-full" />
                         </div>
                     ))}
+
+                    {!editingId && (
+                        <>
+                            <div>
+                                <input
+                                    list="supplier-options" placeholder="Supplier (optional)" value={form.supplier}
+                                    onChange={(e) => setForm({ ...form, supplier: e.target.value })} className="p-2 border rounded w-full"
+                                />
+                                <datalist id="supplier-options">
+                                    {lookup.suppliers.map((s) => <option key={s} value={s} />)}
+                                </datalist>
+                            </div>
+                            <div>
+                                <input
+                                    list="category-options" placeholder="Category (optional)" value={form.category}
+                                    onChange={(e) => setForm({ ...form, category: e.target.value })} className="p-2 border rounded w-full"
+                                />
+                                <datalist id="category-options">
+                                    {lookup.categories.map((c) => <option key={c} value={c} />)}
+                                </datalist>
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500">Receipt (optional)</label>
+                                <input type="file" accept="image/*,.pdf" ref={receiptRef} className="p-2 border rounded w-full text-sm" />
+                            </div>
+                            <p className="text-xs text-gray-500 sm:col-span-2 lg:col-span-3 -mt-2">
+                                Purchase Price is required so this logs as a Purchase Record right away — no need to come back and edit it in per room later. Supplier, Category, and Receipt help fill that entry out but aren't required.
+                            </p>
+                        </>
+                    )}
+
 
                     <label className="flex items-center gap-2 text-sm sm:col-span-2 lg:col-span-3">
                         <input type="checkbox" checked={form.apply_to_all_rooms} onChange={(e) => setForm({ ...form, apply_to_all_rooms: e.target.checked })} />

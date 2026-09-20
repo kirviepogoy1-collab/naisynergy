@@ -1,11 +1,3 @@
--- ============================================================
--- Migration: replace the old "hired / pending / not hired" pipeline
--- with a simple Active / Inactive employment status, since accounts
--- are already considered hired the moment HR creates them.
--- Run this ONCE against your EXISTING Neon database.
---
--- Neon dashboard -> SQL Editor -> paste this -> Run
--- ============================================================
 
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS is_active SMALLINT DEFAULT 1;
