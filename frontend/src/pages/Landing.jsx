@@ -1,3 +1,4 @@
+```jsx
 import React, { useState, useEffect } from "react";
 import api from "../api/axios";
 import { SECTION_TYPES } from "../components/landing/sectionTypes";
@@ -5,7 +6,9 @@ import { SECTION_TYPES } from "../components/landing/sectionTypes";
 export default function Landing() {
     const [menuOpen, setMenuOpen] = useState(false);
 
-    // Seed from cached data so repeat visitors see the page instantly.
+    // =========================================================
+    // LOAD CACHED LANDING SECTIONS
+    // =========================================================
     const [sections, setSections] = useState(() => {
         try {
             const cached = localStorage.getItem("nai_landing_cache");
@@ -15,6 +18,9 @@ export default function Landing() {
         }
     });
 
+    // =========================================================
+    // FETCH LANDING SECTIONS
+    // =========================================================
     useEffect(() => {
         let cancelled = false;
 
@@ -30,11 +36,11 @@ export default function Landing() {
                         JSON.stringify(data)
                     );
                 } catch {
-                    // Storage unavailable/full - continue normally.
+                    // Ignore localStorage errors.
                 }
             })
             .catch(() => {
-                // Keep cached content if the refresh fails.
+                // Keep cached content if API refresh fails.
                 if (!cancelled && sections === null) {
                     setSections([]);
                 }
@@ -47,7 +53,9 @@ export default function Landing() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // ================= LOADING =================
+    // =========================================================
+    // LOADING
+    // =========================================================
     if (sections === null) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -56,30 +64,46 @@ export default function Landing() {
         );
     }
 
-    // ================= NAVIGATION LINKS =================
-    const navLinks = sections
-        .filter((section) => section.show_in_nav && section.anchor)
+    // =========================================================
+    // REMOVE SYSTEMS FROM ALL PUBLIC LANDING PAGE CONTENT
+    // =========================================================
+    const visibleSections = sections.filter(
+        (section) => section.type !== "systems_grid"
+    );
+
+    // =========================================================
+    // NAVIGATION LINKS
+    // ONLY VISIBLE SECTIONS ARE USED
+    // =========================================================
+    const navLinks = visibleSections
+        .filter(
+            (section) =>
+                section.show_in_nav &&
+                section.anchor
+        )
         .map((section) => ({
             href: `#${section.anchor}`,
             label: section.nav_label || section.anchor,
         }));
 
-    // ================= CONTACT SECTION =================
-    const contactSection = sections.find(
+    // =========================================================
+    // CONTACT SECTION
+    // =========================================================
+    const contactSection = visibleSections.find(
         (section) => section.type === "contact"
     );
 
     return (
         <div className="min-h-screen bg-slate-50">
 
-            {/* =========================================================
+            {/* =====================================================
                 NAVBAR
-            ========================================================= */}
+            ===================================================== */}
             <header className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-lg border-b border-gray-100 shadow-sm">
 
                 <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
 
-                    {/* LOGO + SCHOOL NAME */}
+                    {/* SCHOOL LOGO */}
                     <div className="flex items-center gap-4">
 
                         <img
@@ -89,6 +113,7 @@ export default function Landing() {
                         />
 
                         <div>
+
                             <h1 className="font-extrabold text-lg sm:text-xl text-brand-800 leading-tight">
                                 Nissi Academy International
                             </h1>
@@ -96,6 +121,7 @@ export default function Landing() {
                             <p className="text-xs text-gray-500">
                                 Excellence • Integrity • Innovation
                             </p>
+
                         </div>
 
                     </div>
@@ -121,6 +147,7 @@ export default function Landing() {
                         className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100"
                         aria-label="Toggle menu"
                     >
+
                         <i
                             className={`fa-solid ${
                                 menuOpen
@@ -128,6 +155,7 @@ export default function Landing() {
                                     : "fa-bars"
                             } text-xl text-brand-800`}
                         ></i>
+
                     </button>
 
                 </div>
@@ -152,44 +180,32 @@ export default function Landing() {
 
             </header>
 
-            {/* =========================================================
-                DYNAMIC LANDING PAGE SECTIONS
+            {/* =====================================================
+                DYNAMIC LANDING SECTIONS
 
-                IMPORTANT:
-                systems_grid is intentionally filtered out.
+                systems_grid has already been removed from
+                visibleSections.
+            ===================================================== */}
+            {visibleSections.map((section) => {
 
-                Everything else remains:
-                - Hero
-                - About
-                - Programs
-                - Contact
-                - Other dynamic sections
-            ========================================================= */}
-            {sections
-                .filter(
-                    (section) => section.type !== "systems_grid"
-                )
-                .map((section) => {
+                const entry = SECTION_TYPES[section.type];
 
-                    const entry = SECTION_TYPES[section.type];
+                if (!entry) return null;
 
-                    // Unknown section type - skip safely.
-                    if (!entry) return null;
+                const { Component } = entry;
 
-                    const { Component } = entry;
+                return (
+                    <Component
+                        key={section.id}
+                        content={section.content}
+                        anchor={section.anchor}
+                    />
+                );
+            })}
 
-                    return (
-                        <Component
-                            key={section.id}
-                            content={section.content}
-                            anchor={section.anchor}
-                        />
-                    );
-                })}
-
-            {/* =========================================================
+            {/* =====================================================
                 FOOTER
-            ========================================================= */}
+            ===================================================== */}
             <footer className="bg-brand-900 text-white">
 
                 <div className="max-w-7xl mx-auto px-6 py-16">
@@ -197,7 +213,7 @@ export default function Landing() {
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-12">
 
                         {/* =================================================
-                            SCHOOL LOGO
+                            LOGO
                         ================================================= */}
                         <div>
 
@@ -211,6 +227,9 @@ export default function Landing() {
 
                         {/* =================================================
                             QUICK LINKS
+
+                            Because navLinks is based on visibleSections,
+                            Systems will NOT appear here.
                         ================================================= */}
                         {navLinks.length > 0 && (
                             <div>
