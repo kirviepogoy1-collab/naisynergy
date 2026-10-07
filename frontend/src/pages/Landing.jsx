@@ -1,4 +1,3 @@
-```jsx
 import React, { useState, useEffect } from "react";
 import api from "../api/axios";
 import { SECTION_TYPES } from "../components/landing/sectionTypes";
