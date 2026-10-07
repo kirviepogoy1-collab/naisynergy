@@ -47,6 +47,7 @@ export default function Landing() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // ================= LOADING =================
     if (sections === null) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -55,26 +56,32 @@ export default function Landing() {
         );
     }
 
+    // ================= NAVIGATION LINKS =================
     const navLinks = sections
-        .filter((s) => s.show_in_nav && s.anchor)
-        .map((s) => ({
-            href: `#${s.anchor}`,
-            label: s.nav_label || s.anchor,
+        .filter((section) => section.show_in_nav && section.anchor)
+        .map((section) => ({
+            href: `#${section.anchor}`,
+            label: section.nav_label || section.anchor,
         }));
 
-    // Contact section is still used for social media links.
+    // ================= CONTACT SECTION =================
     const contactSection = sections.find(
-        (s) => s.type === "contact"
+        (section) => section.type === "contact"
     );
 
     return (
         <div className="min-h-screen bg-slate-50">
 
-            {/* ================= NAVBAR ================= */}
+            {/* =========================================================
+                NAVBAR
+            ========================================================= */}
             <header className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-lg border-b border-gray-100 shadow-sm">
+
                 <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
 
+                    {/* LOGO + SCHOOL NAME */}
                     <div className="flex items-center gap-4">
+
                         <img
                             src="/logo.png"
                             alt="School Logo"
@@ -90,9 +97,12 @@ export default function Landing() {
                                 Excellence • Integrity • Innovation
                             </p>
                         </div>
+
                     </div>
 
+                    {/* DESKTOP NAVIGATION */}
                     <nav className="hidden lg:flex gap-8 text-gray-600 font-medium">
+
                         {navLinks.map((link) => (
                             <a
                                 key={link.href}
@@ -102,8 +112,10 @@ export default function Landing() {
                                 {link.label}
                             </a>
                         ))}
+
                     </nav>
 
+                    {/* MOBILE MENU BUTTON */}
                     <button
                         onClick={() => setMenuOpen((v) => !v)}
                         className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100"
@@ -111,14 +123,19 @@ export default function Landing() {
                     >
                         <i
                             className={`fa-solid ${
-                                menuOpen ? "fa-xmark" : "fa-bars"
+                                menuOpen
+                                    ? "fa-xmark"
+                                    : "fa-bars"
                             } text-xl text-brand-800`}
                         ></i>
                     </button>
+
                 </div>
 
+                {/* MOBILE NAVIGATION */}
                 {menuOpen && (
                     <nav className="lg:hidden border-t border-gray-100 bg-white px-6 py-4 flex flex-col gap-4 text-gray-600 font-medium">
+
                         {navLinks.map((link) => (
                             <a
                                 key={link.href}
@@ -129,104 +146,154 @@ export default function Landing() {
                                 {link.label}
                             </a>
                         ))}
+
                     </nav>
                 )}
+
             </header>
 
-            {/* ================= DYNAMIC SECTIONS ================= */}
-            {sections.map((section) => {
-                const entry = SECTION_TYPES[section.type];
+            {/* =========================================================
+                DYNAMIC LANDING PAGE SECTIONS
 
-                if (!entry) return null;
+                IMPORTANT:
+                systems_grid is intentionally filtered out.
 
-                const { Component } = entry;
+                Everything else remains:
+                - Hero
+                - About
+                - Programs
+                - Contact
+                - Other dynamic sections
+            ========================================================= */}
+            {sections
+                .filter(
+                    (section) => section.type !== "systems_grid"
+                )
+                .map((section) => {
 
-                return (
-                    <Component
-                        key={section.id}
-                        content={section.content}
-                        anchor={section.anchor}
-                    />
-                );
-            })}
+                    const entry = SECTION_TYPES[section.type];
 
-            {/* ================= FOOTER ================= */}
+                    // Unknown section type - skip safely.
+                    if (!entry) return null;
+
+                    const { Component } = entry;
+
+                    return (
+                        <Component
+                            key={section.id}
+                            content={section.content}
+                            anchor={section.anchor}
+                        />
+                    );
+                })}
+
+            {/* =========================================================
+                FOOTER
+            ========================================================= */}
             <footer className="bg-brand-900 text-white">
+
                 <div className="max-w-7xl mx-auto px-6 py-16">
 
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-12">
 
-                        {/* School Logo */}
+                        {/* =================================================
+                            SCHOOL LOGO
+                        ================================================= */}
                         <div>
+
                             <img
                                 src="/logo.png"
                                 alt="School Logo"
                                 className="w-20 h-20 object-contain mb-5"
                             />
+
                         </div>
 
-                        {/* Quick Links */}
+                        {/* =================================================
+                            QUICK LINKS
+                        ================================================= */}
                         {navLinks.length > 0 && (
                             <div>
+
                                 <h3 className="font-bold text-xl mb-6">
                                     Quick Links
                                 </h3>
 
                                 <ul className="space-y-3">
+
                                     {navLinks.map((link) => (
                                         <li key={link.href}>
+
                                             <a
                                                 href={link.href}
                                                 className="hover:text-yellow-300 transition"
                                             >
                                                 {link.label}
                                             </a>
+
                                         </li>
                                     ))}
+
                                 </ul>
+
                             </div>
                         )}
 
-                        {/* Social Media */}
+                        {/* =================================================
+                            FOLLOW US
+                        ================================================= */}
                         {contactSection &&
-                            contactSection.content.socialLinks?.length > 0 && (
+                            contactSection.content?.socialLinks?.length > 0 && (
                                 <div>
+
                                     <h3 className="font-bold text-xl mb-6">
                                         Follow Us
                                     </h3>
 
                                     <div className="flex gap-3">
+
                                         {contactSection.content.socialLinks.map(
-                                            (s, i) => (
+                                            (social, index) => (
                                                 <a
-                                                    key={i}
-                                                    href={s.href}
+                                                    key={index}
+                                                    href={social.href}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    aria-label={s.label}
+                                                    aria-label={social.label}
                                                     className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition"
                                                 >
+
                                                     <i
-                                                        className={`${s.icon} text-base`}
+                                                        className={`${social.icon} text-base`}
                                                     ></i>
+
                                                 </a>
                                             )
                                         )}
+
                                     </div>
+
                                 </div>
                             )}
+
                     </div>
 
-                    {/* Copyright */}
+                    {/* =================================================
+                        COPYRIGHT
+                    ================================================= */}
                     <div className="border-t border-white/10 mt-12 pt-8 text-center">
+
                         <p className="text-brand-100">
                             © {new Date().getFullYear()} Nissi Academy International.
                             All Rights Reserved.
                         </p>
+
                     </div>
 
                 </div>
+
             </footer>
+
         </div>
     );
 }
