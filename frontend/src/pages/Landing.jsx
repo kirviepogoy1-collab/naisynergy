@@ -140,6 +140,15 @@ export default function Landing() {
 
                     </nav>
 
+                    {/* DESKTOP PORTAL BUTTON */}
+                    <a
+                        href="/login"
+                        className="hidden lg:inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-brand-700 text-white font-semibold hover:bg-brand-800 transition shadow-sm"
+                    >
+                        <i className="fa-solid fa-right-to-bracket"></i>
+                        Portal
+                    </a>
+
                     {/* MOBILE MENU BUTTON */}
                     <button
                         onClick={() => setMenuOpen((v) => !v)}
@@ -173,6 +182,16 @@ export default function Landing() {
                                 {link.label}
                             </a>
                         ))}
+
+                        {/* MOBILE PORTAL BUTTON */}
+                        <a
+                            href="/login"
+                            onClick={() => setMenuOpen(false)}
+                            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-brand-700 text-white font-semibold hover:bg-brand-800 transition"
+                        >
+                            <i className="fa-solid fa-right-to-bracket"></i>
+                            Portal
+                        </a>
 
                     </nav>
                 )}
