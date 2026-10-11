@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, ShieldCheck, AlertCircle, ArrowRight } from 'lucide-react';
+import { Mail, Lock, ShieldCheck, AlertCircle, ArrowRight, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { HOME_BY_ROLE } from '../utils/homeRoutes';
@@ -82,14 +82,19 @@ export default function Login() {
                     }}
                 />
                 <div className="relative h-full flex flex-col justify-between p-6 sm:p-8 md:p-12 text-white">
-                    <div className="flex items-center gap-3">
+                    {/* Logo + school name link back to the landing page */}
+                    <Link
+                        to="/"
+                        className="flex items-center gap-3 w-fit hover:opacity-90 transition"
+                        aria-label="Go to home page"
+                    >
                         <img
                             src={settings.logo_url}
                             alt="School Logo"
                             className="w-10 h-10 md:w-11 md:h-11 object-contain bg-white rounded-full p-1.5 shadow-sm"
                         />
                         <span className="font-semibold tracking-wide text-sm md:text-base">{settings.school_name}</span>
-                    </div>
+                    </Link>
 
                     <div className="hidden md:block max-w-md">
                         <span className="inline-block h-1 w-10 rounded-full bg-white/60 mb-5" />
@@ -112,6 +117,15 @@ export default function Login() {
                 <div className="w-full max-w-sm">
                     {!pendingToken ? (
                         <form onSubmit={handleSubmit}>
+                            {/* Back to landing page */}
+                            <Link
+                                to="/"
+                                className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-brand-700 transition mb-6"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                                Back to home
+                            </Link>
+
                             <h2 className="font-display text-2xl sm:text-3xl text-gray-900 mb-1">Sign in</h2>
                             <p className="text-sm text-gray-500 mb-7">Enter your credentials to continue.</p>
 
