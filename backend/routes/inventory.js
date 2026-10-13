@@ -526,7 +526,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
         const deductions = {};
         for (const r of affected) {
             if (!r.records_id) continue;
-            deductions[r.records_id] = (deductions[r.records_id] || 0) + Number(r.total);
+            deductions[r.records_id] = (deductions[r.records_id] || 0) + Math.max(Number(r.total) || 0, 1);
         }
 
         const [result] = await pool.query(
@@ -541,7 +541,8 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     }
 
     await pool.query('UPDATE inventory SET deleted_at = NOW(), deleted_by = ? WHERE id = ?', [req.user.id, req.params.id]);
-    await deductFromPurchaseRecord(rows[0].records_id, rows[0].total);
+    // At least 1 unit: creation logs Math.max(units, 1), so deletion must take back the same minimum.
+    await deductFromPurchaseRecord(rows[0].records_id, Math.max(Number(rows[0].total) || 0, 1));
     logActivity(req.user.id, 'asset_delete', null, `Moved asset ${rows[0].asset_code} to Trash`, 'inventory');
     res.json({ message: 'Asset moved to Trash. It can be restored within 30 days.' });
 }));
@@ -552,10 +553,25 @@ router.post('/bulk-delete', asyncHandler(async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: 'ids array is required.' });
     }
+    const placeholders = ids.map(() => '?').join(',');
+    // Grab each row's records_id/total BEFORE soft-deleting so the Purchase Records
+    // can be reduced the same way a single delete does.
+    const [affected] = await pool.query(
+        `SELECT records_id, total FROM inventory WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+        ids
+    );
     await pool.query(
-        `UPDATE inventory SET deleted_at = NOW(), deleted_by = ? WHERE id IN (${ids.map(() => '?').join(',')}) AND deleted_at IS NULL`,
+        `UPDATE inventory SET deleted_at = NOW(), deleted_by = ? WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
         [req.user.id, ...ids]
     );
+    const deductions = {};
+    for (const r of affected) {
+        if (!r.records_id) continue;
+        deductions[r.records_id] = (deductions[r.records_id] || 0) + Math.max(Number(r.total) || 0, 1);
+    }
+    for (const [recordsId, qty] of Object.entries(deductions)) {
+        await deductFromPurchaseRecord(Number(recordsId), qty);
+    }
     logActivity(req.user.id, 'asset_bulk_delete', null, `Moved ${ids.length} asset row(s) to Trash`, 'inventory');
     res.json({ message: `${ids.length} asset(s) moved to Trash. It can be restored within 30 days.` });
 }));

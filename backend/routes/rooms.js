@@ -111,20 +111,30 @@ router.post('/code/:room_code/generate-items', asyncHandler(async (req, res) => 
     const [roomRows] = await pool.query('SELECT room_code FROM rooms WHERE room_code = ?', [roomCode]);
     if (!roomRows[0]) return res.status(404).json({ error: 'Room not found.' });
 
+    // Only copy from items that are not in Trash, and carry over price/date so a
+    // later edit of the placeholder can merge into the existing Purchase Record.
     const [allAssets] = await pool.query(
-        `SELECT DISTINCT ON (asset_code) asset_code, asset_name, description, supplier, category
-         FROM inventory ORDER BY asset_code, created_at DESC`
+        `SELECT DISTINCT ON (asset_code) asset_code, asset_name, description, supplier, category,
+                purchase_price, purchase_date
+         FROM inventory WHERE deleted_at IS NULL
+         ORDER BY asset_code, created_at DESC`
     );
-    const [existing] = await pool.query('SELECT asset_code FROM inventory WHERE room_code = ?', [roomCode]);
+    // Ignore soft-deleted rows, otherwise items deleted from this room
+    // look like they still exist and Generate skips them.
+    const [existing] = await pool.query(
+        'SELECT asset_code FROM inventory WHERE room_code = ? AND deleted_at IS NULL', [roomCode]
+    );
     const existingCodes = new Set(existing.map(r => r.asset_code));
 
     let inserted = 0;
     for (const asset of allAssets) {
         if (existingCodes.has(asset.asset_code)) continue;
         await pool.query(
-            `INSERT INTO inventory (room_code, asset_code, asset_name, description, working, for_repair, non_working, salvage, supplier, category)
-             VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`,
-            [roomCode, asset.asset_code, asset.asset_name, asset.description, asset.supplier, asset.category]
+            `INSERT INTO inventory (room_code, asset_code, asset_name, description, purchase_price, purchase_date,
+                                    working, for_repair, non_working, salvage, supplier, category)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`,
+            [roomCode, asset.asset_code, asset.asset_name, asset.description,
+             asset.purchase_price || 0, asset.purchase_date || null, asset.supplier, asset.category]
         );
         inserted++;
     }
