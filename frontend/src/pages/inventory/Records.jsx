@@ -6,6 +6,7 @@ import Modal from '../../components/Modal';
 import Pagination from '../../components/Pagination';
 import usePagination from '../../hooks/usePagination';
 import api from '../../api/axios';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
 import { fileUrl } from '../../utils/fileUrl';
 
@@ -18,6 +19,7 @@ export default function Records() {
     const [records, setRecords] = useState([]);
     const [stats, setStats] = useState(null);
     const [search, setSearch] = useState('');
+    const debouncedSearch = useDebouncedValue(search);
     const [category, setCategory] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -64,7 +66,7 @@ export default function Records() {
 
     async function load() {
         const [recordsRes, statsRes] = await Promise.all([
-            api.get('/records', { params: { search, category, start_date: startDate, end_date: endDate } }),
+            api.get('/records', { params: { search: debouncedSearch, category, start_date: startDate, end_date: endDate } }),
             api.get('/records/stats/summary')
         ]);
         setRecords(recordsRes.data);
@@ -87,7 +89,7 @@ export default function Records() {
         window.open(buildExportUrl(), '_blank');
     }
 
-    useEffect(() => { load(); }, [search, category, startDate, endDate]);
+    useEffect(() => { load(); }, [debouncedSearch, category, startDate, endDate]);
     useEffect(() => { loadLookup(); }, []);
 
     function resetForm() {

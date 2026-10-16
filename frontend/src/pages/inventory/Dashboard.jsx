@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 
 export default function InventoryDashboard() {
     const navigate = useNavigate();
     const [summary, setSummary] = useState(null);
     const [search, setSearch] = useState('');
+    const debouncedSearch = useDebouncedValue(search);
     const [status, setStatus] = useState('');
     const [results, setResults] = useState([]);
     const [page, setPage] = useState(1);
@@ -17,11 +19,11 @@ export default function InventoryDashboard() {
     }, []);
 
     useEffect(() => {
-        api.get('/inventory', { params: { search, status } }).then((res) => {
+        api.get('/inventory', { params: { search: debouncedSearch, status } }).then((res) => {
             setResults(res.data);
             setPage(1);
         });
-    }, [search, status]);
+    }, [debouncedSearch, status]);
 
     const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
     const pageResults = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

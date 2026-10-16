@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, RefreshCw, Pencil, Trash2, MessageSquare, Send } from 'lucide-react';
+import { ArrowLeft, Plus, RefreshCw, Pencil, Trash2, MessageSquare, Send, Wrench } from 'lucide-react';
 import Layout from '../../components/Layout';
 import Pagination from '../../components/Pagination';
 import usePagination from '../../hooks/usePagination';
 import Modal from '../../components/Modal';
+import FlagUnitModal from '../../components/FlagUnitModal';
 import api from '../../api/axios';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../utils/formatDate';
 
@@ -37,6 +39,8 @@ export default function RoomInventory() {
     const { pageItems: pagedItems, page, setPage, totalPages } = usePagination(items, 15);
     const [personnel, setPersonnel] = useState([]);
     const [search, setSearch] = useState('');
+    const [flagItem, setFlagItem] = useState(null);
+    const debouncedSearch = useDebouncedValue(search);
     const [status, setStatus] = useState('');
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
@@ -66,7 +70,7 @@ export default function RoomInventory() {
     async function load() {
         const [roomRes, itemsRes] = await Promise.all([
             api.get(`/rooms/code/${roomCode}`),
-            api.get('/inventory', { params: { room_code: roomCode, search, status } })
+            api.get('/inventory', { params: { room_code: roomCode, search: debouncedSearch, status } })
         ]);
         setRoom(roomRes.data);
         setItems(itemsRes.data);
@@ -77,7 +81,7 @@ export default function RoomInventory() {
         setPersonnel(personnelRes.data);
     }
 
-    useEffect(() => { load(); }, [roomCode, search, status]);
+    useEffect(() => { load(); }, [roomCode, debouncedSearch, status]);
     useEffect(() => { loadLookup(); }, []);
 
     function startEdit(item) {
@@ -338,6 +342,7 @@ export default function RoomInventory() {
                                 {canManage && (
                                     <td className="py-2 px-3 space-x-1 whitespace-nowrap">
                                         <button onClick={() => startEdit(item)} aria-label="Edit item" className="w-8 h-8 inline-flex items-center justify-center bg-yellow-400 hover:bg-yellow-500 active:bg-yellow-600 rounded-lg text-white transition"><Pencil className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => setFlagItem(item)} aria-label="Flag a unit for repair" title="Flag a specific unit for repair" className="w-8 h-8 inline-flex items-center justify-center bg-orange-500 hover:bg-orange-600 active:bg-orange-700 rounded-lg text-white transition"><Wrench className="w-3.5 h-3.5" /></button>
                                         <button onClick={() => handleDelete(item)} aria-label="Delete item" className="w-8 h-8 inline-flex items-center justify-center bg-red-500 hover:bg-red-600 active:bg-red-700 rounded-lg text-white transition"><Trash2 className="w-3.5 h-3.5" /></button>
                                     </td>
                                 )}
@@ -413,6 +418,7 @@ export default function RoomInventory() {
                     </button>
                 </form>
             </Modal>
+            <FlagUnitModal item={flagItem} open={!!flagItem} onClose={() => setFlagItem(null)} onSaved={load} />
         </Layout>
     );
 }

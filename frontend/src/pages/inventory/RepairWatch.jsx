@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Wrench, AlertTriangle, MessageSquare, Send } from 'lucide-react';
+import { Wrench, AlertTriangle, MessageSquare, Send, Check, X as XIcon, Plus } from 'lucide-react';
+import Swal from 'sweetalert2';
 import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
+import FlagUnitModal from '../../components/FlagUnitModal';
 import api from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../utils/formatDate';
@@ -15,6 +17,8 @@ export default function RepairWatch() {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [commentItem, setCommentItem] = useState(null);
+    const [flagItem, setFlagItem] = useState(null);
+    const [roomFilter, setRoomFilter] = useState('');
     const [comments, setComments] = useState([]);
     const [newComment, setNewComment] = useState('');
     const [commentsLoading, setCommentsLoading] = useState(false);
@@ -66,7 +70,28 @@ export default function RepairWatch() {
         refreshItems();
     }
 
-    const aging = items.filter((i) => (i.days_in_repair ?? 0) >= AGING_THRESHOLD_DAYS);
+    async function resolveUnit(unit, outcome) {
+        const fixed = outcome === 'fixed';
+        const result = await Swal.fire({
+            title: fixed ? `Mark "${unit.unit_label}" as fixed?` : `Mark "${unit.unit_label}" as can't be repaired?`,
+            icon: 'question', showCancelButton: true, confirmButtonColor: '#16a34a',
+            confirmButtonText: fixed ? 'Yes, it works again' : 'Yes, non-working'
+        });
+        if (!result.isConfirmed) return;
+        try {
+            await api.post(`/inventory/repair-units/${unit.id}/resolve`, { outcome });
+            refreshItems();
+        } catch (err) {
+            Swal.fire('Error', err.response?.data?.error || 'Failed to update.', 'error');
+        }
+    }
+
+    // Room filter options come from the data already loaded (only rooms that
+    // actually have something in repair), so a comlab with 40 mice can be
+    // narrowed to just that room.
+    const roomOptions = Array.from(new Map(items.map((i) => [i.room_code, `${i.room_name} (${i.building})`])).entries());
+    const visibleItems = roomFilter ? items.filter((i) => i.room_code === roomFilter) : items;
+    const aging = visibleItems.filter((i) => (i.days_in_repair ?? 0) >= AGING_THRESHOLD_DAYS);
 
     return (
         <Layout title="Repair Watch">
@@ -76,9 +101,16 @@ export default function RepairWatch() {
             </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
-                <StatTile label="Total In Repair" value={items.reduce((sum, i) => sum + Number(i.for_repair || 0), 0)} icon={Wrench} color="bg-yellow-100 text-yellow-700" />
-                <StatTile label="Item Rows" value={items.length} icon={Wrench} color="bg-brand-100 text-brand-700" />
+                <StatTile label="Total In Repair" value={visibleItems.reduce((sum, i) => sum + Number(i.for_repair || 0), 0)} icon={Wrench} color="bg-yellow-100 text-yellow-700" />
+                <StatTile label="Item Rows" value={visibleItems.length} icon={Wrench} color="bg-brand-100 text-brand-700" />
                 <StatTile label={`${AGING_THRESHOLD_DAYS}+ Days`} value={aging.length} icon={AlertTriangle} color="bg-red-100 text-red-700" />
+            </div>
+
+            <div className="mb-4">
+                <select value={roomFilter} onChange={(e) => setRoomFilter(e.target.value)} className="p-2.5 border rounded-lg w-full sm:w-80 bg-white">
+                    <option value="">All rooms</option>
+                    {roomOptions.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                </select>
             </div>
 
             <div className="overflow-x-auto thin-scrollbar bg-white rounded-xl shadow p-4 sm:p-6">
@@ -89,13 +121,14 @@ export default function RepairWatch() {
                             <th className="py-2 px-3 whitespace-nowrap">Room</th>
                             <th className="py-2 px-3 whitespace-nowrap">Building</th>
                             <th className="py-2 px-3 whitespace-nowrap">For Repair</th>
+                            <th className="py-2 px-3 whitespace-nowrap">Which units</th>
                             <th className="py-2 px-3 whitespace-nowrap">Reason</th>
                             <th className="py-2 px-3 whitespace-nowrap">Days Flagged</th>
                             <th className="py-2 px-3 whitespace-nowrap">Comments</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {items.map((item) => {
+                        {visibleItems.map((item) => {
                             const days = item.days_in_repair;
                             const isAging = days !== null && days >= AGING_THRESHOLD_DAYS;
                             return (
@@ -110,6 +143,9 @@ export default function RepairWatch() {
                                     <td className="py-2 px-3">{item.building}</td>
                                     <td className="py-2 px-3">
                                         <span className="inline-flex items-center justify-center w-7 h-7 rounded-full text-white text-xs font-semibold bg-yellow-500">{item.for_repair}</span>
+                                    </td>
+                                    <td className="py-2 px-3 min-w-[16rem]">
+                                        <UnitList item={item} canManage={canManage} onResolve={resolveUnit} onFlag={() => setFlagItem(item)} />
                                     </td>
                                     <td className="py-2 px-3 text-gray-600">{item.repair_reason || '—'}</td>
                                     <td className="py-2 px-3">
@@ -135,14 +171,16 @@ export default function RepairWatch() {
                             );
                         })}
                         {!loading && items.length === 0 && (
-                            <tr><td colSpan={7} className="text-center text-gray-400 py-10">Nothing is currently flagged for repair. 🎉</td></tr>
+                            <tr><td colSpan={8} className="text-center text-gray-400 py-10">Nothing is currently flagged for repair. 🎉</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={7} className="text-center text-gray-400 py-10">Loading...</td></tr>
+                            <tr><td colSpan={8} className="text-center text-gray-400 py-10">Loading...</td></tr>
                         )}
                     </tbody>
                 </table>
             </div>
+
+            <FlagUnitModal item={flagItem} open={!!flagItem} onClose={() => setFlagItem(null)} onSaved={refreshItems} />
 
             <Modal open={!!commentItem} onClose={closeComments} title={commentItem ? `Comments - ${commentItem.asset_name}` : 'Comments'} maxWidth="max-w-lg">
                 <div className="max-h-80 overflow-y-auto thin-scrollbar space-y-3 mb-4">
@@ -176,6 +214,37 @@ export default function RepairWatch() {
                 </form>
             </Modal>
         </Layout>
+    );
+}
+
+function UnitList({ item, canManage, onResolve, onFlag }) {
+    const units = Array.isArray(item.units) ? item.units : [];
+    const untagged = Math.max(Number(item.for_repair) - units.length, 0);
+    return (
+        <div className="space-y-1.5">
+            {units.map((u) => (
+                <div key={u.id} className="flex items-center justify-between gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1">
+                    <div className="min-w-0">
+                        <p className="text-xs font-semibold text-gray-800 truncate">{u.unit_label}</p>
+                        <p className="text-[10px] text-gray-500 truncate">{u.reason || 'No reason noted'} · {u.days}d</p>
+                    </div>
+                    {canManage && (
+                        <div className="flex gap-1 shrink-0">
+                            <button onClick={() => onResolve(u, 'fixed')} title="Fixed - back to working" className="w-6 h-6 inline-flex items-center justify-center rounded bg-green-600 hover:bg-green-700 text-white"><Check className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => onResolve(u, 'non_working')} title="Can't be repaired" className="w-6 h-6 inline-flex items-center justify-center rounded bg-red-500 hover:bg-red-600 text-white"><XIcon className="w-3.5 h-3.5" /></button>
+                        </div>
+                    )}
+                </div>
+            ))}
+            {untagged > 0 && (
+                <p className="text-[11px] text-amber-700">{untagged} unit{untagged > 1 ? 's' : ''} not identified yet</p>
+            )}
+            {canManage && (
+                <button onClick={onFlag} className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:text-brand-900">
+                    <Plus className="w-3 h-3" /> {untagged > 0 ? 'Name a unit' : 'Flag another unit'}
+                </button>
+            )}
+        </div>
     );
 }
 

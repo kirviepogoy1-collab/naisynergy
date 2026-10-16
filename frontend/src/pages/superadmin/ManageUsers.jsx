@@ -5,6 +5,7 @@ import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
 import PasswordInput from '../../components/PasswordInput';
 import api from '../../api/axios';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 
 const ROLES = ['superadmin', 'hr_staff', 'inventory_staff', 'inventory_viewer', 'employee'];
 const ROLE_LABELS = { inventory_viewer: 'Inventory: Viewer / Commentor' };
@@ -13,16 +14,17 @@ const roleLabel = (r) => ROLE_LABELS[r] || r;
 export default function ManageUsers() {
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState('');
+    const debouncedSearch = useDebouncedValue(search);
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState({ name: '', username: '', email: '', password: '', role: 'employee' });
 
     async function loadUsers() {
-        const { data } = await api.get('/users', { params: { search } });
+        const { data } = await api.get('/users', { params: { search: debouncedSearch } });
         setUsers(data);
     }
 
-    useEffect(() => { loadUsers(); }, [search]);
+    useEffect(() => { loadUsers(); }, [debouncedSearch]);
 
     async function handleRoleChange(id, role) {
         await api.put(`/users/${id}/role`, { role });

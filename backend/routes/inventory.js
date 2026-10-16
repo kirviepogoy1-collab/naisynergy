@@ -35,6 +35,23 @@ const migrationsReady = (async () => {
         // added later via edit has something to log the purchase record with.
         await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier VARCHAR(150) NULL');
         await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS category VARCHAR(100) NULL');
+        // Per-unit repair tags. inventory rows are quantity-based (e.g. "Mouse: 40
+        // working, 2 for repair") so they can't say WHICH mouse is broken. Each row
+        // here names one specific unit (e.g. "PC-17 mouse") that is currently being
+        // repaired. inventory.for_repair stays the source of truth for counts.
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS inventory_repair_units (
+                id SERIAL PRIMARY KEY,
+                inventory_id INT NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
+                unit_label VARCHAR(150) NOT NULL,
+                reason TEXT NULL,
+                flagged_at TIMESTAMP DEFAULT NOW(),
+                flagged_by INT NULL REFERENCES users(id) ON DELETE SET NULL,
+                resolved_at TIMESTAMP NULL,
+                resolved_by INT NULL REFERENCES users(id) ON DELETE SET NULL,
+                outcome VARCHAR(20) NULL
+            )`);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_repair_units_open ON inventory_repair_units(inventory_id) WHERE resolved_at IS NULL');
     } catch (err) {
         console.error('Failed to migrate inventory table:', err.message);
     }
@@ -97,6 +114,9 @@ router.get('/', asyncHandler(async (req, res) => {
     if (status === 'salvage') sql += ' AND inv.salvage > 0';
 
     sql += ' ORDER BY inv.room_code, inv.asset_code';
+    // A single room is naturally small, but a search across ALL rooms with an
+    // empty/short term could return the whole table - cap it as a safety valve.
+    if (!room_code) sql += ' LIMIT 300';
     const [rows] = await pool.query(sql, params);
     res.json(rows);
 }));
@@ -210,7 +230,15 @@ router.get('/repair-watch', asyncHandler(async (req, res) => {
                CASE WHEN inv.repair_flagged_at IS NOT NULL
                     THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - inv.repair_flagged_at)) / 86400)::INT
                     ELSE NULL END AS days_in_repair,
-               (SELECT COUNT(*) FROM inventory_comments c WHERE c.item_id = inv.id) AS comment_count
+               (SELECT COUNT(*) FROM inventory_comments c WHERE c.item_id = inv.id) AS comment_count,
+               COALESCE((
+                   SELECT json_agg(json_build_object(
+                              'id', u.id, 'unit_label', u.unit_label, 'reason', u.reason,
+                              'days', FLOOR(EXTRACT(EPOCH FROM (NOW() - u.flagged_at)) / 86400)::INT
+                          ) ORDER BY u.flagged_at)
+                   FROM inventory_repair_units u
+                   WHERE u.inventory_id = inv.id AND u.resolved_at IS NULL
+               ), '[]'::json) AS units
         FROM inventory inv
         JOIN rooms r ON inv.room_code = r.room_code
         WHERE inv.for_repair > 0 AND inv.deleted_at IS NULL
@@ -218,6 +246,91 @@ router.get('/repair-watch', asyncHandler(async (req, res) => {
     `);
     res.json(rows);
 }));
+
+// POST /api/inventory/:id/repair-units - name the specific unit that needs repair
+// (e.g. "PC-17 mouse"). If the row already has untagged units counted as "for
+// repair" (older data), this just tags one of them. Otherwise it moves one unit
+// from Working to For Repair automatically, so counts and tags never disagree.
+router.post('/:id/repair-units', requireRole('superadmin', 'inventory_staff'), asyncHandler(async (req, res) => {
+    const label = String(req.body.unit_label || '').trim().slice(0, 150);
+    const reason = String(req.body.reason || '').trim() || null;
+    if (!label) return res.status(400).json({ error: 'Enter which unit it is, e.g. "PC-17 mouse".' });
+
+    const [rows] = await pool.query(
+        'SELECT id, asset_name, asset_code, working, for_repair FROM inventory WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
+    const item = rows[0];
+    if (!item) return res.status(404).json({ error: 'Asset not found.' });
+
+    const [dupe] = await pool.query(
+        'SELECT id FROM inventory_repair_units WHERE inventory_id = ? AND resolved_at IS NULL AND LOWER(unit_label) = LOWER(?)',
+        [item.id, label]);
+    if (dupe[0]) return res.status(409).json({ error: `"${label}" is already flagged for repair.` });
+
+    const [openRows] = await pool.query(
+        'SELECT COUNT(*)::INT AS n FROM inventory_repair_units WHERE inventory_id = ? AND resolved_at IS NULL', [item.id]);
+    const openCount = openRows[0].n;
+
+    if (openCount >= Number(item.for_repair)) {
+        // Every flagged unit is already named - flag one more from the working pool.
+        const [, moveMeta] = await pool.query(
+            `UPDATE inventory SET working = working - 1, for_repair = for_repair + 1,
+             repair_flagged_at = COALESCE(repair_flagged_at, NOW())
+             WHERE id = ? AND working > 0`, [item.id]);
+        if (!moveMeta.affectedRows) {
+            return res.status(400).json({ error: 'No working units left to flag on this item.' });
+        }
+    }
+
+    await pool.query(
+        'INSERT INTO inventory_repair_units (inventory_id, unit_label, reason, flagged_by) VALUES (?, ?, ?, ?)',
+        [item.id, label, reason, req.user.id]);
+    logActivity(req.user.id, 'repair_flag', null, `Flagged "${label}" (${item.asset_name}, ${item.asset_code}) for repair`, 'inventory');
+    res.status(201).json({ message: 'Unit flagged for repair.' });
+}));
+
+// POST /api/inventory/repair-units/:unitId/resolve { outcome: 'fixed' | 'non_working' }
+router.post('/repair-units/:unitId/resolve', requireRole('superadmin', 'inventory_staff'), asyncHandler(async (req, res) => {
+    const outcome = req.body.outcome;
+    if (!['fixed', 'non_working'].includes(outcome)) {
+        return res.status(400).json({ error: "Outcome must be 'fixed' or 'non_working'." });
+    }
+    // Claim the unit first (only one request can win), then adjust the counts.
+    const [claimed] = await pool.query(
+        `UPDATE inventory_repair_units SET resolved_at = NOW(), resolved_by = ?, outcome = ?
+         WHERE id = ? AND resolved_at IS NULL RETURNING inventory_id, unit_label`,
+        [req.user.id, outcome, req.params.unitId]);
+    const unit = claimed[0];
+    if (!unit) return res.status(404).json({ error: 'That unit is no longer flagged for repair.' });
+
+    await pool.query(
+        `UPDATE inventory SET
+             for_repair = GREATEST(for_repair - 1, 0),
+             working = working + ?::int,
+             non_working = non_working + ?::int,
+             repair_flagged_at = CASE WHEN for_repair - 1 <= 0 THEN NULL ELSE repair_flagged_at END
+         WHERE id = ?`,
+        [outcome === 'fixed' ? 1 : 0, outcome === 'non_working' ? 1 : 0, unit.inventory_id]);
+    logActivity(req.user.id, 'repair_resolve', null,
+        `${outcome === 'fixed' ? 'Marked fixed' : 'Marked non-working'}: "${unit.unit_label}"`, 'inventory');
+    res.json({ message: 'Updated.' });
+}));
+
+// Keeps named units consistent when the For Repair COUNT is edited by hand on
+// the item form: if the new count is lower than the number of named units,
+// the extra (newest) tags are closed out so the list never shows more units
+// than the count says. Pass { inventoryId } or { assetCode } (apply-to-all-rooms).
+async function trimOpenUnits({ inventoryId, assetCode }, keep) {
+    await pool.query(
+        `UPDATE inventory_repair_units SET resolved_at = NOW(), outcome = 'cleared'
+         WHERE id IN (
+             SELECT id FROM (
+                 SELECT u.id, ROW_NUMBER() OVER (PARTITION BY u.inventory_id ORDER BY u.flagged_at ASC) AS rn
+                 FROM inventory_repair_units u JOIN inventory i ON i.id = u.inventory_id
+                 WHERE u.resolved_at IS NULL AND ${inventoryId ? 'i.id = ?' : 'i.asset_code = ?'}
+             ) t WHERE t.rn > ?::int
+         )`,
+        [inventoryId || assetCode, keep]);
+}
 
 // GET /api/inventory/:itemId/comments - anyone who can see the item can read its comments
 router.get('/:itemId/comments', asyncHandler(async (req, res) => {
@@ -456,6 +569,7 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
             );
         }
 
+        await trimOpenUnits({ assetCode: rows[0].asset_code }, newForRepair);
         logActivity(req.user.id, 'asset_update', null, `Updated ${asset_name} (${rows[0].asset_code}) across ${result.affectedRows} room(s)`, 'inventory');
         return res.json({ message: `Updated across ${result.affectedRows} room(s).` });
     }
@@ -473,6 +587,8 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
         [asset_name, description, purchase_date, purchase_price, working, for_repair, non_working, salvage, repair_reason,
             supplier || null, category || null, receiptPath, repairFlaggedAt, req.params.id]
     );
+
+    await trimOpenUnits({ inventoryId: req.params.id }, newForRepair);
 
     // First time this specific row gets a real price — log it once, then never again.
     if (newPrice > 0 && rows[0].purchase_logged !== true) {

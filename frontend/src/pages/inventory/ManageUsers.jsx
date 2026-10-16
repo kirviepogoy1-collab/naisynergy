@@ -5,6 +5,7 @@ import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
 import PasswordInput from '../../components/PasswordInput';
 import api from '../../api/axios';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 
 const EMPTY_FORM = { name: '', username: '', email: '', password: '', role: 'inventory_staff' };
 const ROLE_OPTIONS = [
@@ -15,16 +16,17 @@ const ROLE_OPTIONS = [
 export default function InventoryManageUsers() {
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState('');
+    const debouncedSearch = useDebouncedValue(search);
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
 
     async function loadUsers() {
-        const { data } = await api.get('/users', { params: { search, scope: 'inventory' } });
+        const { data } = await api.get('/users', { params: { search: debouncedSearch, scope: 'inventory' } });
         setUsers(data);
     }
 
-    useEffect(() => { loadUsers(); }, [search]);
+    useEffect(() => { loadUsers(); }, [debouncedSearch]);
 
     function resetForm() {
         setForm(EMPTY_FORM);

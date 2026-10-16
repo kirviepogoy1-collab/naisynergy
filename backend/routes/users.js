@@ -41,6 +41,8 @@ router.get('/', asyncHandler(async (req, res) => {
         if (!scoped) params.push(search);
     }
     sql += " ORDER BY is_online DESC, role='superadmin' DESC, name ASC";
+    // Safety valve so one request can never pull the whole users table.
+    sql += ' LIMIT 100';
     const [rows] = await pool.query(sql, params);
     res.json(rows);
 }));

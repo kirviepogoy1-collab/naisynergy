@@ -4,6 +4,7 @@ import { X, Download, Upload, FileDown } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
 
 export default function AssetSummary() {
@@ -13,17 +14,18 @@ export default function AssetSummary() {
     const [assets, setAssets] = useState([]);
     const [search, setSearch] = useState(searchParams.get('search') || '');
     const [status, setStatus] = useState(searchParams.get('status') || '');
+    const debouncedSearch = useDebouncedValue(search);
     const [selected, setSelected] = useState(null);
     const [rooms, setRooms] = useState([]);
     const [importing, setImporting] = useState(false);
     const fileInputRef = useRef(null);
 
     async function load() {
-        const { data } = await api.get('/inventory/asset-summary', { params: { search, status } });
+        const { data } = await api.get('/inventory/asset-summary', { params: { search: debouncedSearch, status } });
         setAssets(data);
     }
 
-    useEffect(() => { load(); }, [search, status]);
+    useEffect(() => { load(); }, [debouncedSearch, status]);
 
     useEffect(() => {
         const newSearch = searchParams.get('search') || '';
