@@ -654,8 +654,30 @@ async function deductFromPurchaseRecord(recordsId, qty) {
     }
 }
 
+// Finds the purchase record an item's units were counted in. Normally that is
+// its records_id; if that link is empty or stale (e.g. the record was removed and
+// re-created), fall back to the record matching the item's own name/price/date/
+// supplier/category - the same fields upsertPurchaseRecord merges on. Only items
+// that were actually logged as a purchase are matched.
+async function resolveRecordsId(row) {
+    if (row.records_id) {
+        const [r] = await pool.query('SELECT id FROM records WHERE id = ?', [row.records_id]);
+        if (r[0]) return row.records_id;
+    }
+    if (row.purchase_logged !== true || !(Number(row.purchase_price) > 0)) return null;
+    const [m] = await pool.query(
+        `SELECT id FROM records
+         WHERE item_name = ? AND purchase_price = ?
+           AND purchase_date IS NOT DISTINCT FROM ?
+           AND supplier IS NOT DISTINCT FROM ?
+           AND category IS NOT DISTINCT FROM ?
+         LIMIT 1`,
+        [row.asset_name, Number(row.purchase_price), row.purchase_date || null, row.supplier || null, row.category || null]);
+    return m[0] ? m[0].id : null;
+}
+
 router.delete('/:id', asyncHandler(async (req, res) => {
-    const [rows] = await pool.query('SELECT asset_code, records_id, total FROM inventory WHERE id = ? AND deleted_at IS NULL', [req.params.id]);
+    const [rows] = await pool.query(`SELECT asset_code, records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged FROM inventory WHERE id = ? AND deleted_at IS NULL`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Asset not found.' });
 
     if (req.query.delete_across_all_rooms === '1') {
@@ -664,13 +686,14 @@ router.delete('/:id', asyncHandler(async (req, res) => {
         // purchase batches (bought 3 in January, 2 more in March, say) — each
         // batch's record gets deducted only by the rooms that actually came from it.
         const [affected] = await pool.query(
-            'SELECT records_id, total FROM inventory WHERE asset_code = ? AND deleted_at IS NULL',
+            `SELECT records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged FROM inventory WHERE asset_code = ? AND deleted_at IS NULL`,
             [rows[0].asset_code]
         );
         const deductions = {};
         for (const r of affected) {
-            if (!r.records_id) continue;
-            deductions[r.records_id] = (deductions[r.records_id] || 0) + Math.max(Number(r.total) || 0, 1);
+            const rid = await resolveRecordsId(r);
+            if (!rid) continue;
+            deductions[rid] = (deductions[rid] || 0) + Math.max(Number(r.total) || 0, 1);
         }
 
         const [result] = await pool.query(
@@ -686,7 +709,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 
     await pool.query('UPDATE inventory SET deleted_at = NOW(), deleted_by = ? WHERE id = ?', [req.user.id, req.params.id]);
     // At least 1 unit: creation logs Math.max(units, 1), so deletion must take back the same minimum.
-    await deductFromPurchaseRecord(rows[0].records_id, Math.max(Number(rows[0].total) || 0, 1));
+    await deductFromPurchaseRecord(await resolveRecordsId(rows[0]), Math.max(Number(rows[0].total) || 0, 1));
     logActivity(req.user.id, 'asset_delete', null, `Moved asset ${rows[0].asset_code} to Trash`, 'inventory');
     res.json({ message: 'Asset moved to Trash. It can be restored within 30 days.' });
 }));
@@ -701,7 +724,7 @@ router.post('/bulk-delete', asyncHandler(async (req, res) => {
     // Grab each row's records_id/total BEFORE soft-deleting so the Purchase Records
     // can be reduced the same way a single delete does.
     const [affected] = await pool.query(
-        `SELECT records_id, total FROM inventory WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+        `SELECT records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged FROM inventory WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
         ids
     );
     await pool.query(
@@ -710,8 +733,9 @@ router.post('/bulk-delete', asyncHandler(async (req, res) => {
     );
     const deductions = {};
     for (const r of affected) {
-        if (!r.records_id) continue;
-        deductions[r.records_id] = (deductions[r.records_id] || 0) + Math.max(Number(r.total) || 0, 1);
+        const rid = await resolveRecordsId(r);
+        if (!rid) continue;
+        deductions[rid] = (deductions[rid] || 0) + Math.max(Number(r.total) || 0, 1);
     }
     for (const [recordsId, qty] of Object.entries(deductions)) {
         await deductFromPurchaseRecord(Number(recordsId), qty);
