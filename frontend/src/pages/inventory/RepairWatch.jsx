@@ -226,7 +226,7 @@ function UnitList({ item, canManage, onResolve, onFlag }) {
                 <div key={u.id} className="flex items-center justify-between gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1">
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-gray-800 truncate">{u.unit_label}</p>
-                        <p className="text-[10px] text-gray-500 truncate">{u.reason || 'No reason noted'} · {u.days}d</p>
+                        <p className="text-[10px] text-gray-500 truncate">{u.days}d in repair</p>
                     </div>
                     {canManage && (
                         <div className="flex gap-1 shrink-0">

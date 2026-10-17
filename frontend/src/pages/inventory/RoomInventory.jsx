@@ -14,7 +14,7 @@ import { formatDateTime } from '../../utils/formatDate';
 
 const EMPTY_FORM = {
     asset_code: '', asset_name: '', description: '', purchase_date: '', purchase_price: '',
-    working: 0, for_repair: 0, non_working: 0, salvage: 0, repair_reason: '', apply_to_all_rooms: false,
+    working: 0, for_repair: 0, non_working: 0, salvage: 0, repair_reason: '', repair_unit: '', apply_to_all_rooms: false,
     supplier: '', category: ''
 };
 
@@ -92,7 +92,7 @@ export default function RoomInventory() {
             asset_code: item.asset_code, asset_name: item.asset_name, description: item.description || '',
             purchase_date: item.purchase_date || '', purchase_price: item.purchase_price,
             working: item.working, for_repair: item.for_repair, non_working: item.non_working, salvage: item.salvage,
-            repair_reason: item.repair_reason || '', apply_to_all_rooms: false,
+            repair_reason: item.repair_reason || '', repair_unit: '', apply_to_all_rooms: false,
             supplier: item.supplier || '', category: item.category || ''
         });
         setShowForm(true);
@@ -254,6 +254,9 @@ export default function RoomInventory() {
                     <input type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} className="p-2 border rounded" />
                     <input type="number" step="0.01" min="0.01" required={!editingId} placeholder={editingId ? 'Purchase Price' : 'Purchase Price (required)'} value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} className="p-2 border rounded" />
                     <input placeholder="Repair Reason (optional)" value={form.repair_reason} onChange={(e) => setForm({ ...form, repair_reason: e.target.value })} className="p-2 border rounded" />
+                    {editingId && !form.apply_to_all_rooms && Number(form.for_repair) > 0 && (
+                        <input placeholder='Which unit? (optional) e.g. "PC-17 mouse"' value={form.repair_unit} onChange={(e) => setForm({ ...form, repair_unit: e.target.value })} className="p-2 border rounded" />
+                    )}
 
                     {['working', 'for_repair', 'non_working', 'salvage'].map((f) => (
                         <div key={f}>

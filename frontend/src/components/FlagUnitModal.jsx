@@ -8,16 +8,15 @@ import api from '../api/axios';
 // backend (flagging a unit moves it from Working to For Repair).
 export default function FlagUnitModal({ item, open, onClose, onSaved }) {
     const [label, setLabel] = useState('');
-    const [reason, setReason] = useState('');
     const [saving, setSaving] = useState(false);
 
-    useEffect(() => { if (open) { setLabel(''); setReason(''); } }, [open]);
+    useEffect(() => { if (open) { setLabel(''); } }, [open]);
 
     async function submit(e) {
         e.preventDefault();
         setSaving(true);
         try {
-            await api.post(`/inventory/${item.id}/repair-units`, { unit_label: label, reason });
+            await api.post(`/inventory/${item.id}/repair-units`, { unit_label: label });
             onSaved?.();
             onClose();
         } catch (err) {
@@ -39,11 +38,6 @@ export default function FlagUnitModal({ item, open, onClose, onSaved }) {
                         required autoFocus maxLength={150}
                         placeholder='Which one? e.g. "PC-17 mouse" or serial no.'
                         value={label} onChange={(e) => setLabel(e.target.value)}
-                        className="w-full p-2.5 border rounded-lg"
-                    />
-                    <input
-                        placeholder="What's wrong? (optional) e.g. double-click, no cursor"
-                        value={reason} onChange={(e) => setReason(e.target.value)}
                         className="w-full p-2.5 border rounded-lg"
                     />
                     <div className="flex gap-2">

@@ -590,6 +590,20 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
 
     await trimOpenUnits({ inventoryId: req.params.id }, newForRepair);
 
+    // Optional "which unit?" typed in the edit form: name one of the units now
+    // counted as For Repair (skipped if they're all already named or it's a duplicate).
+    const repairUnit = String(req.body.repair_unit || '').trim().slice(0, 150);
+    if (repairUnit && newForRepair > 0) {
+        const [open] = await pool.query(
+            'SELECT unit_label FROM inventory_repair_units WHERE inventory_id = ? AND resolved_at IS NULL', [req.params.id]);
+        const duplicate = open.some((u) => u.unit_label.toLowerCase() === repairUnit.toLowerCase());
+        if (!duplicate && open.length < newForRepair) {
+            await pool.query(
+                'INSERT INTO inventory_repair_units (inventory_id, unit_label, flagged_by) VALUES (?, ?, ?)',
+                [req.params.id, repairUnit, req.user.id]);
+        }
+    }
+
     // First time this specific row gets a real price — log it once, then never again.
     if (newPrice > 0 && rows[0].purchase_logged !== true) {
         const newRecordsId = await upsertPurchaseRecord({
