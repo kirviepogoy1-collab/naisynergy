@@ -6,7 +6,7 @@ import Modal from '../../components/Modal';
 import Pagination from '../../components/Pagination';
 import usePagination from '../../hooks/usePagination';
 import api from '../../api/axios';
-import useDebouncedValue from '../../hooks/useDebouncedValue';
+import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
 import { fileUrl } from '../../utils/fileUrl';
 
@@ -20,6 +20,7 @@ export default function Records() {
     const [stats, setStats] = useState(null);
     const [search, setSearch] = useState('');
     const debouncedSearch = useDebouncedValue(search);
+    const nextSignal = useLatestSignal();
     const [category, setCategory] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -65,12 +66,16 @@ export default function Records() {
     }
 
     async function load() {
-        const [recordsRes, statsRes] = await Promise.all([
-            api.get('/records', { params: { search: debouncedSearch, category, start_date: startDate, end_date: endDate } }),
-            api.get('/records/stats/summary')
-        ]);
-        setRecords(recordsRes.data);
-        setStats(statsRes.data);
+        try {
+            const [recordsRes, statsRes] = await Promise.all([
+                api.get('/records', { params: { search: debouncedSearch, category, start_date: startDate, end_date: endDate }, signal: nextSignal() }),
+                api.get('/records/stats/summary')
+            ]);
+            setRecords(recordsRes.data);
+            setStats(statsRes.data);
+        } catch (err) {
+            if (!isCanceled(err)) throw err;
+        }
     }
 
     function buildExportUrl() {
@@ -163,7 +168,7 @@ export default function Records() {
     }
 
     return (
-        <Layout title="Purchase Records">
+        <Layout hideSearch title="Purchase Records">
             {stats && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 mb-8">
                     <MetricCard label="SPENT THIS MONTH" value={`₱${Number(stats.this_month_total).toLocaleString()}`} meta={new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })} color="border-blue-200 text-blue-700" />

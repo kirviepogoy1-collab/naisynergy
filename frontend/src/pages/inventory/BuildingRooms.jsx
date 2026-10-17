@@ -65,7 +65,7 @@ export default function BuildingRooms() {
     const filtered = rooms.filter((r) => r.room_code.toLowerCase().includes(search.toLowerCase()));
 
     return (
-        <Layout title={`${buildingName} Rooms`}>
+        <Layout hideSearch title={`${buildingName} Rooms`}>
             <input
                 placeholder="Search by Room Code"
                 value={search}

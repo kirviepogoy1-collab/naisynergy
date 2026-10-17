@@ -5,7 +5,7 @@ import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
 import PasswordInput from '../../components/PasswordInput';
 import api from '../../api/axios';
-import useDebouncedValue from '../../hooks/useDebouncedValue';
+import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 
 const EMPTY_FORM = { name: '', username: '', email: '', password: '', role: 'inventory_staff' };
 const ROLE_OPTIONS = [
@@ -17,13 +17,18 @@ export default function InventoryManageUsers() {
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState('');
     const debouncedSearch = useDebouncedValue(search);
+    const nextSignal = useLatestSignal();
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
 
     async function loadUsers() {
-        const { data } = await api.get('/users', { params: { search: debouncedSearch, scope: 'inventory' } });
-        setUsers(data);
+        try {
+            const { data } = await api.get('/users', { params: { search: debouncedSearch, scope: 'inventory' }, signal: nextSignal() });
+            setUsers(data);
+        } catch (err) {
+            if (!isCanceled(err)) throw err;
+        }
     }
 
     useEffect(() => { loadUsers(); }, [debouncedSearch]);
@@ -79,7 +84,7 @@ export default function InventoryManageUsers() {
     }
 
     return (
-        <Layout title="Manage Users">
+        <Layout hideSearch title="Manage Users">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
                 <input
                     placeholder="Search by name, username, or email"

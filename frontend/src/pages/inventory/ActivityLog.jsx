@@ -27,7 +27,7 @@ export default function InventoryActivityLog() {
     const { pageItems: pagedActivity, page, setPage, totalPages } = usePagination(filtered, 15);
 
     return (
-        <Layout title="User Activity">
+        <Layout hideSearch title="User Activity">
             <div className="bg-white rounded-2xl shadow p-4 sm:p-6 max-w-4xl">
                 <div className="flex items-center justify-between mb-4 gap-3">
                     <p className="text-sm text-gray-500">Last {activity.length} account changes for inventory staff.</p>

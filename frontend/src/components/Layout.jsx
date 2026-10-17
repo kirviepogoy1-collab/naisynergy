@@ -5,9 +5,10 @@ import NotificationBell from './NotificationBell';
 import GlobalSearch from './GlobalSearch';
 import { useAuth } from '../context/AuthContext';
 
-export default function Layout({ title, children, headerExtra }) {
+export default function Layout({ title, children, headerExtra, hideSearch = false }) {
     const { user } = useAuth();
-    const canSearch = user?.role === 'hr_staff' || user?.role === 'superadmin';
+    // hideSearch: pages that already have their own search bar skip the header one.
+    const canSearch = !hideSearch && (user?.role === 'hr_staff' || user?.role === 'superadmin');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     return (

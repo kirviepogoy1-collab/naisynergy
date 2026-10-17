@@ -8,7 +8,7 @@ import usePagination from '../../hooks/usePagination';
 import Modal from '../../components/Modal';
 import FlagUnitModal from '../../components/FlagUnitModal';
 import api from '../../api/axios';
-import useDebouncedValue from '../../hooks/useDebouncedValue';
+import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../utils/formatDate';
 
@@ -41,6 +41,7 @@ export default function RoomInventory() {
     const [search, setSearch] = useState('');
     const [flagItem, setFlagItem] = useState(null);
     const debouncedSearch = useDebouncedValue(search);
+    const nextSignal = useLatestSignal();
     const [status, setStatus] = useState('');
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
@@ -68,9 +69,10 @@ export default function RoomInventory() {
     }
 
     async function load() {
+        try {
         const [roomRes, itemsRes] = await Promise.all([
             api.get(`/rooms/code/${roomCode}`),
-            api.get('/inventory', { params: { room_code: roomCode, search: debouncedSearch, status } })
+            api.get('/inventory', { params: { room_code: roomCode, search: debouncedSearch, status }, signal: nextSignal() })
         ]);
         setRoom(roomRes.data);
         setItems(itemsRes.data);
@@ -79,6 +81,9 @@ export default function RoomInventory() {
         const area = `${roomRes.data.building} - ${roomRes.data.room_name}`;
         const personnelRes = await api.get('/personnel', { params: { area } });
         setPersonnel(personnelRes.data);
+        } catch (err) {
+            if (!isCanceled(err)) throw err;
+        }
     }
 
     useEffect(() => { load(); }, [roomCode, debouncedSearch, status]);
@@ -204,7 +209,7 @@ export default function RoomInventory() {
     if (!room) return <Layout title="Room"><p className="text-gray-500">Loading...</p></Layout>;
 
     return (
-        <Layout title={`${room.room_code} - ${room.room_name}`}>
+        <Layout hideSearch title={`${room.room_code} - ${room.room_name}`}>
             <Link to={`/inventory/buildings/${encodeURIComponent(room.building)}`} className="inline-flex items-center gap-1.5 text-brand-600 text-sm font-medium hover:underline mb-4">
                 <ArrowLeft className="w-4 h-4" /> Back to {room.building}
             </Link>

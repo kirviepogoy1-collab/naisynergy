@@ -202,7 +202,7 @@ export default function Employees() {
     const { pageItems: pagedEmployees, page, setPage, totalPages } = usePagination(filtered, 15);
 
     return (
-        <Layout title="Employees">
+        <Layout hideSearch title="Employees">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
                 <input
                     placeholder="Search by name or email"

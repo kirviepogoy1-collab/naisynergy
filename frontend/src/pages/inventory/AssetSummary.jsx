@@ -4,7 +4,7 @@ import { X, Download, Upload, FileDown } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
-import useDebouncedValue from '../../hooks/useDebouncedValue';
+import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
 
 export default function AssetSummary() {
@@ -15,14 +15,19 @@ export default function AssetSummary() {
     const [search, setSearch] = useState(searchParams.get('search') || '');
     const [status, setStatus] = useState(searchParams.get('status') || '');
     const debouncedSearch = useDebouncedValue(search);
+    const nextSignal = useLatestSignal();
     const [selected, setSelected] = useState(null);
     const [rooms, setRooms] = useState([]);
     const [importing, setImporting] = useState(false);
     const fileInputRef = useRef(null);
 
     async function load() {
-        const { data } = await api.get('/inventory/asset-summary', { params: { search: debouncedSearch, status } });
-        setAssets(data);
+        try {
+            const { data } = await api.get('/inventory/asset-summary', { params: { search: debouncedSearch, status }, signal: nextSignal() });
+            setAssets(data);
+        } catch (err) {
+            if (!isCanceled(err)) throw err;
+        }
     }
 
     useEffect(() => { load(); }, [debouncedSearch, status]);
@@ -107,7 +112,7 @@ export default function AssetSummary() {
     );
 
     return (
-        <Layout title="Asset Summary">
+        <Layout hideSearch title="Asset Summary">
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-4 mb-6">
                 <StatTile label="Asset Types" value={totals.assetTypes} clickable onClick={() => updateQueryParams('', '')} />
                 <StatTile label="Working" value={totals.working} clickable onClick={() => updateQueryParams('', 'working')} />

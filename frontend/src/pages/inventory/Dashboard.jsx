@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
-import useDebouncedValue from '../../hooks/useDebouncedValue';
+import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 
 export default function InventoryDashboard() {
     const navigate = useNavigate();
     const [summary, setSummary] = useState(null);
     const [search, setSearch] = useState('');
     const debouncedSearch = useDebouncedValue(search);
+    const nextSignal = useLatestSignal();
     const [status, setStatus] = useState('');
     const [results, setResults] = useState([]);
     const [page, setPage] = useState(1);
@@ -19,10 +20,12 @@ export default function InventoryDashboard() {
     }, []);
 
     useEffect(() => {
-        api.get('/inventory', { params: { search: debouncedSearch, status } }).then((res) => {
-            setResults(res.data);
-            setPage(1);
-        });
+        api.get('/inventory', { params: { search: debouncedSearch, status }, signal: nextSignal() })
+            .then((res) => {
+                setResults(res.data);
+                setPage(1);
+            })
+            .catch((err) => { if (!isCanceled(err)) throw err; });
     }, [debouncedSearch, status]);
 
     const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
@@ -33,7 +36,7 @@ export default function InventoryDashboard() {
     }
 
     return (
-        <Layout title="Inventory Dashboard">
+        <Layout hideSearch title="Inventory Dashboard">
             {!summary ? (
                 <p className="text-gray-500">Loading...</p>
             ) : (
