@@ -88,6 +88,14 @@ async function query(sql, params = []) {
         affectedRows: result.rowCount
     };
 
+    // mysql2-style code does `const [result] = await pool.query(INSERT ...)` and then
+    // reads result.insertId / result.affectedRows. Here the first element is the rows
+    // array, so those reads were silently `undefined` (e.g. a brand-new Purchase Record
+    // never got linked back to the item that created it). Exposing the same two fields
+    // on the rows array makes both `[rows]` and `[rows, meta]` styles work.
+    result.rows.insertId = meta.insertId;
+    result.rows.affectedRows = meta.affectedRows;
+
     return [result.rows, meta];
 }
 
