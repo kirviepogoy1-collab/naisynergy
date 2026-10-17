@@ -14,6 +14,11 @@ export default function NotificationBell() {
     const navigate = useNavigate();
 
     const fetchNotifications = useCallback(async () => {
+        // Don't poll while the tab is hidden - refreshed as soon as it's visible again.
+        if (document.hidden) return;
+        // Layout mounts two bells (desktop header + mobile header) and hides one with
+        // CSS, so only the one actually on screen should hit the backend.
+        if (wrapperRef.current && wrapperRef.current.offsetParent === null) return;
         try {
             const { data } = await api.get('/notifications');
             setNotifications(data.notifications);
@@ -26,7 +31,12 @@ export default function NotificationBell() {
     useEffect(() => {
         fetchNotifications();
         const interval = setInterval(fetchNotifications, POLL_INTERVAL_MS);
-        return () => clearInterval(interval);
+        const onVisible = () => { if (!document.hidden) fetchNotifications(); };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisible);
+        };
     }, [fetchNotifications]);
 
     // Close the dropdown when clicking outside of it
