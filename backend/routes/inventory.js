@@ -121,6 +121,21 @@ router.get('/', asyncHandler(async (req, res) => {
     res.json(rows);
 }));
 
+// GET /api/inventory/quick-search?q= - tiny lookup behind the inventory header
+// search box: asset name or code only, 8 rows max, so it stays cheap to call.
+router.get('/quick-search', asyncHandler(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    const [rows] = await pool.query(
+        `SELECT inv.id, inv.asset_name, inv.asset_code, inv.room_code, r.room_name, r.building
+         FROM inventory inv JOIN rooms r ON inv.room_code = r.room_code
+         WHERE inv.deleted_at IS NULL AND (inv.asset_name ILIKE ? OR inv.asset_code ILIKE ?)
+         ORDER BY inv.asset_name, inv.room_code LIMIT 8`,
+        [like, like]);
+    res.json(rows);
+}));
+
 // GET /api/inventory/summary - condition/value breakdown by building (dashboard cards)
 router.get('/summary', asyncHandler(async (req, res) => {
     const [byBuilding] = await pool.query(`

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, RefreshCw, Pencil, Trash2, MessageSquare, Send, Wrench } from 'lucide-react';
 import Layout from '../../components/Layout';
 import Pagination from '../../components/Pagination';
@@ -38,7 +38,8 @@ export default function RoomInventory() {
     const [items, setItems] = useState([]);
     const { pageItems: pagedItems, page, setPage, totalPages } = usePagination(items, 15);
     const [personnel, setPersonnel] = useState([]);
-    const [search, setSearch] = useState('');
+    const [searchParams] = useSearchParams();
+    const [search, setSearch] = useState(searchParams.get('search') || '');
     const [flagItem, setFlagItem] = useState(null);
     const debouncedSearch = useDebouncedValue(search);
     const nextSignal = useLatestSignal();

@@ -3,17 +3,20 @@ import Sidebar from './Sidebar';
 import BottomNav from './BottomNav';
 import NotificationBell from './NotificationBell';
 import GlobalSearch from './GlobalSearch';
+import InventorySearch from './InventorySearch';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Layout({ title, children, headerExtra, hideSearch = false }) {
     const { user } = useAuth();
     const { pathname } = useLocation();
-    // The header search finds employees and documents, so it is skipped on every
-    // inventory page, and on any page that passes hideSearch (pages with their own
-    // search bar, or nothing to look up such as settings).
+    // Header search: employees/documents/leaves outside inventory (HR + superadmin),
+    // asset name/code inside inventory pages. hideSearch turns it off on pages that
+    // have their own search bar or nothing to look up (e.g. settings).
     const inInventory = pathname.startsWith('/inventory');
-    const canSearch = !hideSearch && !inInventory && (user?.role === 'hr_staff' || user?.role === 'superadmin');
+    const canSearchPeople = !hideSearch && !inInventory && (user?.role === 'hr_staff' || user?.role === 'superadmin');
+    const canSearchAssets = !hideSearch && inInventory && ['superadmin', 'inventory_staff', 'inventory_viewer'].includes(user?.role);
+    const HeaderSearch = canSearchAssets ? InventorySearch : canSearchPeople ? GlobalSearch : null;
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     return (
@@ -26,7 +29,7 @@ export default function Layout({ title, children, headerExtra, hideSearch = fals
                         {headerExtra}
                     </div>
                     <div className="flex items-center gap-3">
-                        {canSearch && <GlobalSearch />}
+                        {HeaderSearch && <HeaderSearch />}
                         <NotificationBell />
                     </div>
                 </div>
@@ -38,9 +41,9 @@ export default function Layout({ title, children, headerExtra, hideSearch = fals
                     <NotificationBell />
                 </div>
 
-                {canSearch && (
+                {HeaderSearch && (
                     <div className="md:hidden px-4 pb-3">
-                        <GlobalSearch />
+                        <HeaderSearch />
                     </div>
                 )}
 
