@@ -725,7 +725,8 @@ router.post('/bulk-delete', asyncHandler(async (req, res) => {
 // TRASH (soft-deleted assets) - viewing and restoring is open to
 // inventory_staff/superadmin, matching their create/edit/delete
 // rights elsewhere. Permanent purge (skipping the 30-day undo
-// window) stays superadmin-only since that action is irreversible.
+// window) is also limited to superadmin/inventory_staff; viewers can't
+// reach the trash at all.
 // Anything past 30 days is purged for good the next time this
 // list is loaded.
 // ============================================================
@@ -758,7 +759,7 @@ router.post('/:id/restore', requireRole('superadmin', 'inventory_staff'), asyncH
 
 // DELETE /api/inventory/:id/purge - permanently remove one item right now
 // (skip the 30-day wait), for when someone is certain it should be gone.
-router.delete('/:id/purge', requireRole('superadmin'), asyncHandler(async (req, res) => {
+router.delete('/:id/purge', requireRole('superadmin', 'inventory_staff'), asyncHandler(async (req, res) => {
     const [rows] = await pool.query('SELECT asset_code FROM inventory WHERE id = ? AND deleted_at IS NOT NULL', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Trashed asset not found.' });
 

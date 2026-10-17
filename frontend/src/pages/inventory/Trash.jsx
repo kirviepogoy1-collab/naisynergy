@@ -3,9 +3,13 @@ import Swal from 'sweetalert2';
 import { Trash2, RotateCcw, XCircle } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../utils/formatDate';
 
 export default function InventoryTrash() {
+    const { user } = useAuth();
+    // Delete Forever is irreversible: superadmin and inventory staff only (viewers never reach this page).
+    const canPurge = user?.role === 'superadmin' || user?.role === 'inventory_staff';
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -31,9 +35,13 @@ export default function InventoryTrash() {
             confirmButtonColor: '#16a34a'
         });
         if (!result.isConfirmed) return;
-        await api.post(`/inventory/${item.id}/restore`);
-        Swal.fire('Restored', 'The asset is back in inventory.', 'success');
-        load();
+        try {
+            await api.post(`/inventory/${item.id}/restore`);
+            Swal.fire('Restored', 'The asset is back in inventory.', 'success');
+            load();
+        } catch (err) {
+            Swal.fire('Error', err.response?.data?.error || 'Could not restore this asset.', 'error');
+        }
     }
 
     async function handlePurge(item) {
@@ -46,9 +54,13 @@ export default function InventoryTrash() {
             confirmButtonColor: '#dc2626'
         });
         if (!result.isConfirmed) return;
-        await api.delete(`/inventory/${item.id}/purge`);
-        Swal.fire('Deleted', 'The asset has been permanently removed.', 'success');
-        load();
+        try {
+            await api.delete(`/inventory/${item.id}/purge`);
+            Swal.fire('Deleted', 'The asset has been permanently removed.', 'success');
+            load();
+        } catch (err) {
+            Swal.fire('Error', err.response?.data?.error || 'Could not delete this asset.', 'error');
+        }
     }
 
     return (
@@ -77,7 +89,7 @@ export default function InventoryTrash() {
                             <tr key={item.id} className="border-b hover:bg-brand-50">
                                 <td className="py-2 px-3 space-x-1 whitespace-nowrap">
                                     <button onClick={() => handleRestore(item)} aria-label="Restore item" title="Restore" className="w-8 h-8 inline-flex items-center justify-center bg-green-500 hover:bg-green-600 active:bg-green-700 rounded-lg text-white transition"><RotateCcw className="w-3.5 h-3.5" /></button>
-                                    <button onClick={() => handlePurge(item)} aria-label="Delete forever" title="Delete Forever" className="w-8 h-8 inline-flex items-center justify-center bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-lg text-white transition"><XCircle className="w-3.5 h-3.5" /></button>
+                                    {canPurge && <button onClick={() => handlePurge(item)} aria-label="Delete forever" title="Delete Forever" className="w-8 h-8 inline-flex items-center justify-center bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-lg text-white transition"><XCircle className="w-3.5 h-3.5" /></button>}
                                 </td>
                                 <td className="py-2 px-3 text-brand-700 font-medium whitespace-nowrap">{item.asset_code}</td>
                                 <td className="py-2 px-3">{item.asset_name}</td>
