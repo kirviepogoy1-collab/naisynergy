@@ -77,7 +77,7 @@ export default function Settings() {
     }
 
     return (
-        <Layout title="System Settings">
+        <Layout hideSearch title="System Settings">
             <div className="max-w-2xl">
                 <p className="text-sm text-gray-500 mb-6">
                     Customize the logo, color theme, and name shown across the whole system - useful if another school

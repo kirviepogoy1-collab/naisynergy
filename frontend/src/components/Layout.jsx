@@ -3,12 +3,17 @@ import Sidebar from './Sidebar';
 import BottomNav from './BottomNav';
 import NotificationBell from './NotificationBell';
 import GlobalSearch from './GlobalSearch';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Layout({ title, children, headerExtra, hideSearch = false }) {
     const { user } = useAuth();
-    // hideSearch: pages that already have their own search bar skip the header one.
-    const canSearch = !hideSearch && (user?.role === 'hr_staff' || user?.role === 'superadmin');
+    const { pathname } = useLocation();
+    // The header search finds employees and documents, so it is skipped on every
+    // inventory page, and on any page that passes hideSearch (pages with their own
+    // search bar, or nothing to look up such as settings).
+    const inInventory = pathname.startsWith('/inventory');
+    const canSearch = !hideSearch && !inInventory && (user?.role === 'hr_staff' || user?.role === 'superadmin');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     return (

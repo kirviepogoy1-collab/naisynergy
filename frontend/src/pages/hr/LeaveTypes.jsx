@@ -145,7 +145,7 @@ export default function LeaveTypes() {
     }
 
     return (
-        <Layout title="Leave Types" headerExtra={
+        <Layout hideSearch title="Leave Types" headerExtra={
             <button onClick={handleResetAll} className="inline-flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-red-100 whitespace-nowrap">
                 <RotateCcw className="w-4 h-4" /> Reset All Types
             </button>

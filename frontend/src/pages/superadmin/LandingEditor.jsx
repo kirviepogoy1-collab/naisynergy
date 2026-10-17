@@ -493,7 +493,7 @@ export default function LandingEditor() {
     }
 
     return (
-        <Layout title="Landing Page Editor">
+        <Layout hideSearch title="Landing Page Editor">
             <div className="max-w-4xl">
                 <p className="text-sm text-gray-500 mb-6">
                     Build the public landing page without touching code. Add, remove, reorder, and edit sections below -
