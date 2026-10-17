@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 import { UserPlus, Trash2, Pencil } from 'lucide-react';
 import Layout from '../../components/Layout';
@@ -14,7 +14,15 @@ export default function Personnel() {
     const { user } = useAuth();
     const canManage = user.role === 'superadmin' || user.role === 'inventory_staff';
     const [personnel, setPersonnel] = useState([]);
-    const { pageItems: pagedPersonnel, page, setPage, totalPages } = usePagination(personnel, 15);
+    const [search, setSearch] = useState('');
+    // Filters the list already loaded - no extra backend request while typing.
+    const filteredPersonnel = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return personnel;
+        return personnel.filter((p) =>
+            [p.area, p.personnel_name, p.contact_number].some((v) => String(v || '').toLowerCase().includes(q)));
+    }, [personnel, search]);
+    const { pageItems: pagedPersonnel, page, setPage, totalPages } = usePagination(filteredPersonnel, 15);
     const [rooms, setRooms] = useState([]);
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
@@ -103,7 +111,7 @@ export default function Personnel() {
     }
 
     return (
-        <Layout title="Assigned Personnel">
+        <Layout title="Assigned Personnel" pageSearch={{ value: search, onChange: setSearch, placeholder: 'Search area or name...' }}>
             {canManage && (
                 <div className="mb-6">
                     <button onClick={startAdd} className="inline-flex items-center gap-2 bg-brand-600 text-white px-4 py-2.5 rounded-lg font-semibold hover:bg-brand-700 min-h-[44px]">

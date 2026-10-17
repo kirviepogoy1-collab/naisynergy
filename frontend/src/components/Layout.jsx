@@ -4,10 +4,11 @@ import BottomNav from './BottomNav';
 import NotificationBell from './NotificationBell';
 import GlobalSearch from './GlobalSearch';
 import InventorySearch from './InventorySearch';
+import PageSearch from './PageSearch';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-export default function Layout({ title, children, headerExtra, hideSearch = false }) {
+export default function Layout({ title, children, headerExtra, hideSearch = false, pageSearch = null }) {
     const { user } = useAuth();
     const { pathname } = useLocation();
     // Header search: employees/documents/leaves outside inventory (HR + superadmin),
@@ -16,7 +17,10 @@ export default function Layout({ title, children, headerExtra, hideSearch = fals
     const inInventory = pathname.startsWith('/inventory');
     const canSearchPeople = !hideSearch && !inInventory && (user?.role === 'hr_staff' || user?.role === 'superadmin');
     const canSearchAssets = !hideSearch && inInventory && ['superadmin', 'inventory_staff', 'inventory_viewer'].includes(user?.role);
-    const HeaderSearch = canSearchAssets ? InventorySearch : canSearchPeople ? GlobalSearch : null;
+    // pageSearch ({ value, onChange, placeholder }) wins: the page filters its own list.
+    const searchNode = pageSearch
+        ? <PageSearch {...pageSearch} />
+        : canSearchAssets ? <InventorySearch /> : canSearchPeople ? <GlobalSearch /> : null;
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     return (
@@ -29,7 +33,7 @@ export default function Layout({ title, children, headerExtra, hideSearch = fals
                         {headerExtra}
                     </div>
                     <div className="flex items-center gap-3">
-                        {HeaderSearch && <HeaderSearch />}
+                        {searchNode}
                         <NotificationBell />
                     </div>
                 </div>
@@ -41,9 +45,9 @@ export default function Layout({ title, children, headerExtra, hideSearch = fals
                     <NotificationBell />
                 </div>
 
-                {HeaderSearch && (
+                {searchNode && (
                     <div className="md:hidden px-4 pb-3">
-                        <HeaderSearch />
+                        {searchNode}
                     </div>
                 )}
 

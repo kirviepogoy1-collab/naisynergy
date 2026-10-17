@@ -10,6 +10,7 @@ import { confirmLeaveApproval } from '../../utils/leaveApproval';
 export default function LeaveApplications() {
     const [leaves, setLeaves] = useState([]);
     const [filter, setFilter] = useState('pending');
+    const [search, setSearch] = useState('');
     const [mySignature, setMySignature] = useState(null);
     const fileInputRef = useRef(null);
 
@@ -99,7 +100,10 @@ export default function LeaveApplications() {
         e.target.value = '';
     }
 
-    const filtered = filter === 'all' ? leaves : leaves.filter((l) => l.status === filter);
+    const searchTerm = search.trim().toLowerCase();
+    const filtered = leaves
+        .filter((l) => filter === 'all' || l.status === filter)
+        .filter((l) => !searchTerm || [l.employee_name, l.leave_type].some((v) => String(v || '').toLowerCase().includes(searchTerm)));
 
     async function handleExport() {
         const res = await api.get('/leaves/export', { responseType: 'blob' });
@@ -114,7 +118,7 @@ export default function LeaveApplications() {
     }
 
     return (
-        <Layout title="Leave Applications" headerExtra={
+        <Layout title="Leave Applications" pageSearch={{ value: search, onChange: setSearch, placeholder: 'Search employee or leave type...' }} headerExtra={
             <div className="flex flex-wrap items-center gap-2">
                 {mySignature && (
                     <img src={fileUrl(mySignature)} alt="my signature" className="h-8 border rounded bg-white px-1" />

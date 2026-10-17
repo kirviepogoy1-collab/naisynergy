@@ -13,6 +13,7 @@ const MAX_ATTACHMENT_MB = 15;
 export default function HrChat() {
     const { user } = useAuth();
     const [threads, setThreads] = useState([]);
+    const [search, setSearch] = useState('');
     const [activeId, setActiveId] = useState(null);
     const [messages, setMessages] = useState([]);
     const [text, setText] = useState('');
@@ -107,7 +108,7 @@ export default function HrChat() {
     const activeThread = threads.find((t) => t.employee_id === activeId);
 
     return (
-        <Layout hideSearch title="Chat">
+        <Layout title="Chat" pageSearch={{ value: search, onChange: setSearch, placeholder: 'Search employees...' }}>
             {pushState !== 'granted' && pushState !== 'unsupported' && (
                 <div className="bg-brand-50 border rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm mb-4 max-w-4xl">
                     <span className="text-brand-800 inline-flex items-center gap-1.5"><Bell className="w-3.5 h-3.5 shrink-0" /> Get notified when an employee messages</span>
@@ -120,7 +121,7 @@ export default function HrChat() {
             <div className="bg-white rounded-2xl shadow max-w-4xl flex overflow-hidden" style={{ height: '75vh', maxHeight: '820px' }}>
                 {/* Thread list: full width on mobile when no chat open, fixed column on desktop */}
                 <div className={`w-full md:w-64 border-r overflow-y-auto thin-scrollbar shrink-0 ${activeId ? 'hidden md:block' : 'block'}`}>
-                    {threads.map((t) => (
+                    {threads.filter((t) => String(t.employee_name || '').toLowerCase().includes(search.trim().toLowerCase())).map((t) => (
                         <button
                             key={t.employee_id}
                             onClick={() => setActiveId(t.employee_id)}
@@ -148,6 +149,9 @@ export default function HrChat() {
                         </button>
                     ))}
                     {threads.length === 0 && <p className="text-center text-gray-400 text-sm p-4">No employees found.</p>}
+                    {threads.length > 0 && search.trim() && !threads.some((t) => String(t.employee_name || '').toLowerCase().includes(search.trim().toLowerCase())) && (
+                        <p className="text-center text-gray-400 text-sm p-4">No employees match "{search.trim()}".</p>
+                    )}
                 </div>
 
                 <div className={`flex-1 flex-col min-w-0 ${activeId ? 'flex' : 'hidden md:flex'}`}>

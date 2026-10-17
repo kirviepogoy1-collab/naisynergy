@@ -40,6 +40,7 @@ function todayPHParts() {
 
 export default function LeaveCalendar() {
     const [leaves, setLeaves] = useState([]);
+    const [search, setSearch] = useState('');
     const [cursor, setCursor] = useState(() => {
         const { year, month } = todayPHParts();
         return { year, month };
@@ -52,7 +53,9 @@ export default function LeaveCalendar() {
     // Map each day (YYYY-MM-DD, in Philippine time) to the leaves covering it
     const leavesByDay = useMemo(() => {
         const map = {};
+        const q = search.trim().toLowerCase();
         for (const l of leaves) {
+            if (q && ![l.employee_name, l.leave_type].some((v) => String(v || '').toLowerCase().includes(q))) continue;
             const [sy, sm, sd] = toDateKeyPH(l.start_date).split('-').map(Number);
             const [ey, em, ed] = toDateKeyPH(l.end_date).split('-').map(Number);
             // Pure calendar-math walk from start to end (inclusive), using
@@ -69,7 +72,7 @@ export default function LeaveCalendar() {
             }
         }
         return map;
-    }, [leaves]);
+    }, [leaves, search]);
 
     const { year, month } = cursor;
     const firstOfMonth = new Date(year, month, 1);
@@ -89,7 +92,7 @@ export default function LeaveCalendar() {
     }
 
     return (
-        <Layout title="Leave Calendar">
+        <Layout title="Leave Calendar" pageSearch={{ value: search, onChange: setSearch, placeholder: 'Search employee or leave type...' }}>
             <div className="bg-white rounded-2xl shadow p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-5">
                     <button

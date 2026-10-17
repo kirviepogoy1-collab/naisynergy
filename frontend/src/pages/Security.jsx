@@ -103,7 +103,7 @@ export default function Security() {
     }
 
     return (
-        <Layout title="Security">
+        <Layout hideSearch title="Security">
             <div className="max-w-xl space-y-6">
                 <div className="bg-white rounded-2xl shadow p-4 sm:p-6">
                     <div className="flex items-center gap-3 mb-4">
