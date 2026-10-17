@@ -640,9 +640,8 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
 // removing the record entirely if that brings it to 0 or below (e.g. deleting
 // the only room that had it). Rows created before this feature shipped have
 // no records_id (records_id IS NULL) and are silently skipped — nothing to
-// deduct from. Note: restoring a deleted item from Trash later does NOT put
-// this deduction back — the purchase record stays as reduced/removed, so a
-// restored item's cost may need to be re-entered manually if that matters.
+// deduct from. Restoring the item from Trash puts its units back into a
+// matching Purchase Record (see POST /:id/restore below).
 async function deductFromPurchaseRecord(recordsId, qty) {
     if (!recordsId || !qty) return;
     const [rows] = await pool.query('SELECT quantity FROM records WHERE id = ?', [recordsId]);
@@ -749,10 +748,25 @@ router.get('/trash', requireRole('superadmin', 'inventory_staff'), asyncHandler(
 
 // POST /api/inventory/:id/restore
 router.post('/:id/restore', requireRole('superadmin', 'inventory_staff'), asyncHandler(async (req, res) => {
-    const [rows] = await pool.query('SELECT asset_code FROM inventory WHERE id = ? AND deleted_at IS NOT NULL', [req.params.id]);
+    const [rows] = await pool.query(
+        `SELECT asset_code, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date,
+                supplier, category, receipt_image, purchase_logged, total
+         FROM inventory WHERE id = ? AND deleted_at IS NOT NULL`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Trashed asset not found (it may have already been purged or restored).' });
 
     await pool.query('UPDATE inventory SET deleted_at = NULL, deleted_by = NULL WHERE id = ?', [req.params.id]);
+
+    // Deleting this item deducted its units from its Purchase Record (and removed the
+    // record if that hit 0), so put them back - otherwise a restored item that already
+    // counts as "logged" would never show up in Purchase Records again.
+    const item = rows[0];
+    if (item.purchase_logged === true && Number(item.purchase_price) > 0) {
+        const newRecordsId = await upsertPurchaseRecord({
+            itemName: item.asset_name, qty: Math.max(Number(item.total) || 0, 1), purchaseDate: item.purchase_date,
+            price: Number(item.purchase_price), supplier: item.supplier, category: item.category, receiptPath: item.receipt_image
+        });
+        await pool.query('UPDATE inventory SET records_id = ? WHERE id = ?', [newRecordsId, req.params.id]);
+    }
     logActivity(req.user.id, 'asset_restore', null, `Restored asset ${rows[0].asset_code} from Trash`, 'inventory');
     res.json({ message: 'Asset restored.' });
 }));
