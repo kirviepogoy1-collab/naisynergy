@@ -123,7 +123,7 @@ export default function AssetSummary() {
 
             <div className="flex flex-col sm:flex-row gap-4 mb-6 items-end">
                 <input
-                    placeholder="Search asset name"
+                    placeholder="Search asset name or code"
                     value={search}
                     onChange={(e) => {
                         setSearch(e.target.value);
@@ -164,6 +164,7 @@ export default function AssetSummary() {
                     <thead className="bg-brand-700 text-white uppercase text-xs">
                         <tr>
                             <th className="py-2 px-3 whitespace-nowrap">Asset</th>
+                            <th className="py-2 px-3 whitespace-nowrap">Asset Code</th>
                             <th className="py-2 px-3 whitespace-nowrap">Working</th>
                             <th className="py-2 px-3 whitespace-nowrap">Repair</th>
                             <th className="py-2 px-3 whitespace-nowrap">Non-Working</th>
@@ -176,6 +177,7 @@ export default function AssetSummary() {
                         {assets.map((a) => (
                             <tr key={a.asset_name} onClick={() => openDrilldown(a.asset_name)} className="border-b hover:bg-brand-50 cursor-pointer">
                                 <td className="py-2 px-3 font-medium text-brand-700 whitespace-nowrap">{a.asset_name}</td>
+                                <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{a.asset_codes || '—'}</td>
                                 <td className="py-2 px-3">{a.working}</td>
                                 <td className="py-2 px-3">{a.for_repair}</td>
                                 <td className="py-2 px-3">{a.non_working}</td>
@@ -185,7 +187,7 @@ export default function AssetSummary() {
                             </tr>
                         ))}
                         {assets.length === 0 && (
-                            <tr><td colSpan="7" className="text-center text-gray-400 py-6">No assets found.</td></tr>
+                            <tr><td colSpan="8" className="text-center text-gray-400 py-6">No assets found.</td></tr>
                         )}
                     </tbody>
                 </table>
@@ -207,6 +209,7 @@ export default function AssetSummary() {
                             <thead className="bg-brand-700 text-white uppercase text-xs">
                                 <tr>
                                     <th className="py-2 px-3 whitespace-nowrap">Room</th>
+                                    <th className="py-2 px-3 whitespace-nowrap">Asset Code</th>
                                     <th className="py-2 px-3 whitespace-nowrap">Building</th>
                                     <th className="py-2 px-3 whitespace-nowrap">Working</th>
                                     <th className="py-2 px-3 whitespace-nowrap">Repair</th>
@@ -218,6 +221,7 @@ export default function AssetSummary() {
                                 {rooms.map((r) => (
                                     <tr key={r.id} className="border-b">
                                         <td className="py-2 px-3 whitespace-nowrap">{r.room_name}</td>
+                                        <td className="py-2 px-3 whitespace-nowrap font-medium text-brand-700">{r.asset_code}</td>
                                         <td className="py-2 px-3 whitespace-nowrap">{r.building}</td>
                                         <td className="py-2 px-3">{r.working}</td>
                                         <td className="py-2 px-3">{r.for_repair}</td>

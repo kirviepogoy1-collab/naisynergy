@@ -165,6 +165,7 @@ router.get('/asset-summary', asyncHandler(async (req, res) => {
     const { search, status } = req.query;
     let sql = `
         SELECT asset_name,
+               string_agg(DISTINCT asset_code, ', ' ORDER BY asset_code) AS asset_codes,
                SUM(working) AS working, SUM(for_repair) AS for_repair,
                SUM(non_working) AS non_working, SUM(salvage) AS salvage,
                SUM(total) AS total, COUNT(DISTINCT room_code) AS room_count
@@ -172,8 +173,8 @@ router.get('/asset-summary', asyncHandler(async (req, res) => {
     `;
     const params = [];
     if (search) {
-        sql += ' AND asset_name ILIKE ?';
-        params.push(`%${search}%`);
+        sql += ' AND (asset_name ILIKE ? OR asset_code ILIKE ?)';
+        params.push(`%${search}%`, `%${search}%`);
     }
     sql += ' GROUP BY asset_name';
     if (status === 'working') sql += ' HAVING SUM(working) > 0';
@@ -201,7 +202,7 @@ router.get('/asset-rooms', asyncHandler(async (req, res) => {
         sql += ' AND (r.room_name ILIKE ? OR r.building ILIKE ?)';
         params.push(`%${search}%`, `%${search}%`);
     }
-    sql += ' ORDER BY r.building, r.room_name';
+    sql += ' ORDER BY r.building, r.room_name, inv.asset_code';
     const [rows] = await pool.query(sql, params);
     res.json(rows);
 }));
