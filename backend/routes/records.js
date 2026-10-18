@@ -10,22 +10,29 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+// Asset codes of the (non-trashed) inventory items counted in each purchase record,
+// e.g. "M1, M2". Records added by hand, or from items that were deleted, show none.
+const ASSET_CODES_SQL = `(SELECT string_agg(DISTINCT i.asset_code, ', ' ORDER BY i.asset_code)
+                          FROM inventory i WHERE i.records_id = r.id AND i.deleted_at IS NULL)`;
+const SEARCH_SQL = `(r.item_name ILIKE ? OR r.supplier ILIKE ? OR r.category ILIKE ?
+                     OR EXISTS (SELECT 1 FROM inventory i WHERE i.records_id = r.id AND i.deleted_at IS NULL AND i.asset_code ILIKE ?))`;
+
 // GET /api/records - list, with optional search + date range filters
 router.get('/', asyncHandler(async (req, res) => {
     const { search, category, start_date, end_date } = req.query;
-    let sql = 'SELECT * FROM records WHERE 1=1';
+    let sql = `SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes FROM records r WHERE 1=1`;
     const params = [];
     if (search) {
-        sql += ' AND (item_name ILIKE ? OR supplier ILIKE ? OR category ILIKE ?)';
-        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        sql += ` AND ${SEARCH_SQL}`;
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (category) {
-        sql += ' AND category = ?';
+        sql += ' AND r.category = ?';
         params.push(category);
     }
-    if (start_date) { sql += ' AND purchase_date >= ?'; params.push(start_date); }
-    if (end_date) { sql += ' AND purchase_date <= ?'; params.push(end_date); }
-    sql += ' ORDER BY purchase_date DESC, id DESC';
+    if (start_date) { sql += ' AND r.purchase_date >= ?'; params.push(start_date); }
+    if (end_date) { sql += ' AND r.purchase_date <= ?'; params.push(end_date); }
+    sql += ' ORDER BY r.purchase_date DESC, r.id DESC';
     const [rows] = await pool.query(sql, params);
     res.json(rows);
 }));
@@ -95,34 +102,34 @@ router.get('/stats/summary', asyncHandler(async (req, res) => {
 // GET /api/records/export - CSV export with grand total row
 router.get('/export', asyncHandler(async (req, res) => {
     const { search, category, start_date, end_date } = req.query;
-    let sql = 'SELECT * FROM records WHERE 1=1';
+    let sql = `SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes FROM records r WHERE 1=1`;
     const params = [];
     if (search) {
-        sql += ' AND (item_name ILIKE ? OR supplier ILIKE ? OR category ILIKE ?)';
-        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        sql += ` AND ${SEARCH_SQL}`;
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (category) {
-        sql += ' AND category = ?';
+        sql += ' AND r.category = ?';
         params.push(category);
     }
-    if (start_date) { sql += ' AND purchase_date >= ?'; params.push(start_date); }
-    if (end_date) { sql += ' AND purchase_date <= ?'; params.push(end_date); }
-    sql += ' ORDER BY purchase_date DESC';
+    if (start_date) { sql += ' AND r.purchase_date >= ?'; params.push(start_date); }
+    if (end_date) { sql += ' AND r.purchase_date <= ?'; params.push(end_date); }
+    sql += ' ORDER BY r.purchase_date DESC';
 
     const [rows] = await pool.query(sql, params);
-    const header = ['Item Name', 'Quantity', 'Purchase Date', 'Unit Price', 'Supplier', 'Category', 'Line Total'];
+    const header = ['Item Name', 'Asset Code', 'Quantity', 'Purchase Date', 'Unit Price', 'Supplier', 'Category', 'Line Total'];
     const csvRows = ['\uFEFF' + header.join(',')]; // UTF-8 BOM so peso signs/accents show right in Excel
     let grandTotal = 0;
     for (const row of rows) {
         const lineTotal = Number(row.quantity) * Number(row.purchase_price);
         grandTotal += lineTotal;
         csvRows.push([
-            `"${row.item_name}"`, row.quantity, row.purchase_date || '', row.purchase_price,
+            `"${row.item_name}"`, `"${row.asset_codes || ''}"`, row.quantity, row.purchase_date || '', row.purchase_price,
             `"${row.supplier || ''}"`, `"${row.category || ''}"`, lineTotal.toFixed(2)
         ].join(','));
     }
     csvRows.push('');
-    csvRows.push(`,,,,,Grand Total:,${grandTotal.toFixed(2)}`);
+    csvRows.push(`,,,,,,Grand Total:,${grandTotal.toFixed(2)}`);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="purchase_records.csv"');

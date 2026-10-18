@@ -201,7 +201,7 @@ export default function Records() {
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input
-                                placeholder="Asset, supplier, category..."
+                                placeholder="Asset name or code, supplier, category..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 className="pl-10 pr-3 py-3 w-full border rounded-lg focus:border-brand-600 focus:ring-brand-100"
@@ -337,6 +337,7 @@ export default function Records() {
                             {canManage && <th className="py-3 px-3"></th>}
                             <th className="py-3 px-3 whitespace-nowrap">#</th>
                             <th className="py-3 px-3 whitespace-nowrap">Asset Name</th>
+                            <th className="py-3 px-3 whitespace-nowrap">Asset Code</th>
                             <th className="py-3 px-3 whitespace-nowrap">Category</th>
                             <th className="py-3 px-3 whitespace-nowrap">Qty</th>
                             <th className="py-3 px-3 whitespace-nowrap">Purchase Date</th>
@@ -358,6 +359,7 @@ export default function Records() {
                                 )}
                                 <td className="py-2 px-3 whitespace-nowrap">{(page - 1) * 15 + index + 1}</td>
                                 <td className="py-2 px-3 whitespace-nowrap font-semibold text-brand-700">{r.item_name}</td>
+                                <td className="py-2 px-3 whitespace-nowrap text-gray-600">{r.asset_codes || '—'}</td>
                                 <td className="py-2 px-3 whitespace-nowrap">{r.category || '—'}</td>
                                 <td className="py-2 px-3 whitespace-nowrap">{r.quantity}</td>
                                 <td className="py-2 px-3 whitespace-nowrap">{formatDate(r.purchase_date)}</td>
@@ -385,7 +387,7 @@ export default function Records() {
                             </tr>
                         ))}
                         {records.length === 0 && (
-                            <tr><td colSpan={canManage ? 12 : 11} className="text-center text-gray-400 py-6">No purchase records yet.</td></tr>
+                            <tr><td colSpan={canManage ? 13 : 12} className="text-center text-gray-400 py-6">No purchase records yet.</td></tr>
                         )}
                     </tbody>
                 </table>
