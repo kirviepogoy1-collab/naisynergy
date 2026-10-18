@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import { UserPlus, Trash2, Pencil } from 'lucide-react';
 import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
+import Pagination from '../../components/Pagination';
 import PasswordInput from '../../components/PasswordInput';
 import api from '../../api/axios';
 import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
@@ -16,20 +17,35 @@ export default function ManageUsers() {
     const [search, setSearch] = useState('');
     const debouncedSearch = useDebouncedValue(search);
     const nextSignal = useLatestSignal();
+    // Server-side paging: the backend returns only the current page of 15 plus the total.
+    const PAGE_SIZE = 15;
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState({ name: '', username: '', email: '', password: '', role: 'employee' });
 
     async function loadUsers() {
         try {
-            const { data } = await api.get('/users', { params: { search: debouncedSearch }, signal: nextSignal() });
-            setUsers(data);
+            const { data } = await api.get('/users', { params: { search: debouncedSearch, page, limit: PAGE_SIZE }, signal: nextSignal() });
+            setUsers(data.rows);
+            setTotal(data.total);
+            if (data.page !== page) setPage(data.page); // e.g. deleted the last user of the last page
         } catch (err) {
             if (!isCanceled(err)) throw err;
         }
     }
 
-    useEffect(() => { loadUsers(); }, [debouncedSearch]);
+    // A new search jumps back to page 1; changing the page just loads that page.
+    const prevSearch = useRef(debouncedSearch);
+    useEffect(() => {
+        if (prevSearch.current !== debouncedSearch) {
+            prevSearch.current = debouncedSearch;
+            if (page !== 1) { setPage(1); return; }
+        }
+        loadUsers();
+    }, [debouncedSearch, page]);
 
     async function handleRoleChange(id, role) {
         await api.put(`/users/${id}/role`, { role });
@@ -169,6 +185,7 @@ export default function ManageUsers() {
                         ))}
                     </tbody>
                 </table>
+                <Pagination page={page} totalPages={totalPages} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} />
             </div>
         </Layout>
     );

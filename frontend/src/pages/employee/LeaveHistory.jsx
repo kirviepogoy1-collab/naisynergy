@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import usePolling from '../../hooks/usePolling';
 import { formatDateTime } from '../../utils/formatDate';
 import { fileUrl } from '../../utils/fileUrl';
 
@@ -19,9 +20,8 @@ export default function LeaveHistory() {
 
     useEffect(() => {
         load();
-        const interval = setInterval(load, 20000);
-        return () => clearInterval(interval);
     }, []);
+    usePolling(load, 20000); // paused while the tab is hidden
 
     async function handleCancel(id) {
         const result = await Swal.fire({ title: 'Cancel this leave request?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#16a34a' });

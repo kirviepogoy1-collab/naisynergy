@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { Paperclip, Send, X, Bell, Trash2 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import usePolling from '../../hooks/usePolling';
 import { useAuth } from '../../context/AuthContext';
 import { enablePushNotifications, getPushPermissionState } from '../../utils/push';
 import { formatDateTime } from '../../utils/formatDate';
@@ -28,9 +29,8 @@ export default function EmployeeChat() {
     useEffect(() => {
         load();
         getPushPermissionState().then(setPushState);
-        const interval = setInterval(load, 8000);
-        return () => clearInterval(interval);
     }, []);
+    usePolling(load, 8000); // paused while the tab is hidden
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

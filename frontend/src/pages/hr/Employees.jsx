@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { CheckCircle2, AlertTriangle, XCircle, Eye, UserPlus, X, FileText, User, Download, FileDown, Upload, Pencil } from 'lucide-react';
 import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
 import Pagination from '../../components/Pagination';
-import usePagination from '../../hooks/usePagination';
+import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 import PasswordInput from '../../components/PasswordInput';
 import api from '../../api/axios';
 import { fileUrl } from '../../utils/fileUrl';
@@ -15,6 +15,13 @@ export default function Employees() {
     const [employees, setEmployees] = useState([]);
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState('all');
+    // Server-side paging: the backend returns only the current page of 15 plus the total.
+    const PAGE_SIZE = 15;
+    const debouncedSearch = useDebouncedValue(search);
+    const nextSignal = useLatestSignal();
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
     const [selected, setSelected] = useState(null); // full profile detail
     const [showAddForm, setShowAddForm] = useState(false);
     const [addForm, setAddForm] = useState({ name: '', username: '', email: '', password: '', employee_number: '', current_position: '', date_employment: '' });
@@ -23,11 +30,29 @@ export default function Employees() {
     const [searchParams, setSearchParams] = useSearchParams();
 
     async function loadEmployees() {
-        const { data } = await api.get('/employees');
-        setEmployees(data);
+        try {
+            const { data } = await api.get('/employees', {
+                params: { search: debouncedSearch, status: filter === 'all' ? undefined : filter, page, limit: PAGE_SIZE },
+                signal: nextSignal()
+            });
+            setEmployees(data.rows);
+            setTotal(data.total);
+            if (data.page !== page) setPage(data.page); // e.g. removed the last employee of the last page
+        } catch (err) {
+            if (!isCanceled(err)) throw err;
+        }
     }
 
-    useEffect(() => { loadEmployees(); }, []);
+    // Changing the search or status jumps back to page 1; changing the page just loads that page.
+    const filterKey = [debouncedSearch, filter].join('|');
+    const prevFilterKey = useRef(filterKey);
+    useEffect(() => {
+        if (prevFilterKey.current !== filterKey) {
+            prevFilterKey.current = filterKey;
+            if (page !== 1) { setPage(1); return; }
+        }
+        loadEmployees();
+    }, [filterKey, page]);
 
     // Coming from a notification (e.g. "?employee=5") - jump straight to that
     // employee's profile instead of making HR hunt for them in the table.
@@ -193,14 +218,6 @@ export default function Employees() {
         return [e.first_name, e.middle_name, e.last_name].filter(Boolean).join(' ') || e.name;
     }
 
-    const filtered = employees.filter((e) => {
-        const matchSearch = displayName(e)?.toLowerCase().includes(search.toLowerCase()) || e.email?.toLowerCase().includes(search.toLowerCase());
-        const matchFilter = filter === 'all' || e.status === filter;
-        return matchSearch && matchFilter;
-    });
-
-    const { pageItems: pagedEmployees, page, setPage, totalPages } = usePagination(filtered, 15);
-
     return (
         <Layout hideSearch title="Employees">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
@@ -287,7 +304,7 @@ export default function Employees() {
                         </tr>
                     </thead>
                     <tbody>
-                        {pagedEmployees.map((e) => (
+                        {employees.map((e) => (
                             <tr key={e.id} className="border-b hover:bg-brand-50">
                                 <td className="py-2 px-4 capitalize whitespace-nowrap">{displayName(e)}</td>
                                 <td className="py-2 px-4 whitespace-nowrap">{e.email}</td>
@@ -310,12 +327,12 @@ export default function Employees() {
                                 </td>
                             </tr>
                         ))}
-                        {filtered.length === 0 && (
+                        {employees.length === 0 && (
                             <tr><td colSpan="6" className="text-center text-gray-400 py-6">No employees found.</td></tr>
                         )}
                     </tbody>
                 </table>
-                <Pagination page={page} totalPages={totalPages} totalItems={filtered.length} pageSize={15} onPageChange={setPage} />
+                <Pagination page={page} totalPages={totalPages} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} />
             </div>
 
             <div className="flex justify-end mt-4">

@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { Download } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import usePolling from '../../hooks/usePolling';
 import { formatDateTime } from '../../utils/formatDate';
 import { fileUrl } from '../../utils/fileUrl';
 import { confirmLeaveApproval } from '../../utils/leaveApproval';
@@ -27,11 +28,11 @@ export default function LeaveApplications() {
     useEffect(() => {
         load();
         loadMyProfile();
-        // Keep the list fresh without a manual refresh - e.g. a new application
-        // coming in while this tab is already open.
-        const interval = setInterval(load, 20000);
-        return () => clearInterval(interval);
     }, []);
+
+    // Keep the list fresh without a manual refresh - e.g. a new application coming in
+    // while this tab is open. Paused while the tab is hidden.
+    usePolling(load, 20000);
 
     async function updateStatus(id, status, pay_status) {
         await api.put(`/leaves/${id}/status`, { status, pay_status });

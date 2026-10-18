@@ -27,23 +27,34 @@ router.get('/', asyncHandler(async (req, res) => {
     const search = req.query.search ? `%${req.query.search}%` : null;
     const scoped = isInventoryScoped(req);
 
-    let sql = `SELECT id, username, email, name, role, is_online, last_login, is_hired, employee_number, created_at
-               FROM users WHERE 1=1`;
+    let where = ' WHERE 1=1';
     const params = [];
 
     if (scoped) {
-        sql += " AND role IN ('inventory_staff', 'inventory_viewer')";
+        where += " AND role IN ('inventory_staff', 'inventory_viewer')";
     }
 
     if (search) {
-        sql += ' AND (username ILIKE ? OR name ILIKE ? OR email ILIKE ?' + (scoped ? '' : ' OR role ILIKE ?') + ')';
+        where += ' AND (username ILIKE ? OR name ILIKE ? OR email ILIKE ?' + (scoped ? '' : ' OR role ILIKE ?') + ')';
         params.push(search, search, search);
         if (!scoped) params.push(search);
     }
-    sql += " ORDER BY is_online DESC, role='superadmin' DESC, name ASC";
-    // Safety valve so one request can never pull the whole users table.
-    sql += ' LIMIT 100';
-    const [rows] = await pool.query(sql, params);
+    const select = 'SELECT id, username, email, name, role, is_online, last_login, is_hired, employee_number, created_at FROM users';
+    const order = " ORDER BY is_online DESC, role='superadmin' DESC, name ASC";
+
+    // With ?page=N&limit=M: one page as { rows, total, page, limit } (page clamped to the last one).
+    if (req.query.page !== undefined) {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
+        const [countRows] = await pool.query(`SELECT COUNT(*)::int AS n FROM users${where}`, params);
+        const total = countRows[0].n;
+        const lastPage = Math.max(Math.ceil(total / limit), 1);
+        const page = Math.min(Math.max(parseInt(req.query.page, 10) || 1, 1), lastPage);
+        const [rows] = await pool.query(`${select}${where}${order} LIMIT ? OFFSET ?`, [...params, limit, (page - 1) * limit]);
+        return res.json({ rows, total, page, limit });
+    }
+
+    // Without ?page: plain array, capped as a safety valve so one request can never pull the whole table.
+    const [rows] = await pool.query(`${select}${where}${order} LIMIT 100`, params);
     res.json(rows);
 }));
 

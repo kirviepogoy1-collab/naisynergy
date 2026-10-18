@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { CheckCircle2, FileClock, Ban, Hourglass, X, Eye } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import usePolling from '../../hooks/usePolling';
 import { fileUrl } from '../../utils/fileUrl';
 import { confirmLeaveApproval } from '../../utils/leaveApproval';
 
@@ -26,11 +27,8 @@ export default function HrDashboard() {
         setPendingDocs(docsRes.data);
     }, []);
 
-    useEffect(() => {
-        load();
-        const interval = setInterval(load, 20000);
-        return () => clearInterval(interval);
-    }, [load]);
+    useEffect(() => { load(); }, [load]);
+    usePolling(load, 20000, [load]); // paused while the tab is hidden
 
     const active = employees.filter((e) => e.is_active).length;
     // "Inactive" reflects HR's actual employment decision (they left, etc.),

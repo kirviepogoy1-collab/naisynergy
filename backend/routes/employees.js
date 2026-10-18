@@ -183,8 +183,22 @@ router.post('/import', csvUpload.single('file'), asyncHandler(async (req, res) =
 
 // GET /api/employees - list all employees with computed hiring/document status
 router.get('/', asyncHandler(async (req, res) => {
-    const [users] = await pool.query("SELECT * FROM users WHERE role = 'employee'");
-    const [allDocs] = await pool.query('SELECT * FROM employee_documents ORDER BY user_id ASC');
+    // Optional ?search= (name/email) and ?status=active|inactive narrow the employees first,
+    // so the documents query below only reads the files of the employees actually listed.
+    let userSql = "SELECT * FROM users WHERE role = 'employee'";
+    const userParams = [];
+    const search = String(req.query.search || '').trim();
+    if (search) {
+        userSql += " AND (CONCAT_WS(' ', first_name, middle_name, last_name) ILIKE ? OR name ILIKE ? OR email ILIKE ?)";
+        const like = `%${search}%`;
+        userParams.push(like, like, like);
+    }
+    if (req.query.status === 'active') userSql += ' AND is_active = 1';
+    if (req.query.status === 'inactive') userSql += ' AND is_active = 0';
+    const [users] = await pool.query(userSql, userParams);
+    const [allDocs] = users.length === 0
+        ? [[]]
+        : await pool.query('SELECT * FROM employee_documents WHERE user_id = ANY(?) ORDER BY user_id ASC', [users.map((u) => u.id)]);
 
     const docsByUser = {};
     for (const doc of allDocs) {
@@ -215,6 +229,16 @@ router.get('/', asyncHandler(async (req, res) => {
 
     // Sort by most missing docs first, like the original admin/users.php
     result.sort((a, b) => (b.doc_summary.pending + b.doc_summary.not_uploaded) - (a.doc_summary.pending + a.doc_summary.not_uploaded));
+
+    // With ?page=N&limit=M: one page as { rows, total, page, limit } (page clamped to the last one),
+    // so only ~15 employees are sent to the browser instead of the whole school.
+    if (req.query.page !== undefined) {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
+        const total = result.length;
+        const lastPage = Math.max(Math.ceil(total / limit), 1);
+        const page = Math.min(Math.max(parseInt(req.query.page, 10) || 1, 1), lastPage);
+        return res.json({ rows: result.slice((page - 1) * limit, page * limit), total, page, limit });
+    }
 
     res.json(result);
 }));

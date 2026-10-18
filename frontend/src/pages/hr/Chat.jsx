@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { Paperclip, Send, X, Bell, Trash2, ArrowLeft, Image as ImageIcon, MessageSquareOff } from 'lucide-react';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
+import usePolling from '../../hooks/usePolling';
 import { useAuth } from '../../context/AuthContext';
 import { enablePushNotifications, getPushPermissionState } from '../../utils/push';
 import { formatDateTime } from '../../utils/formatDate';
@@ -37,17 +38,15 @@ export default function HrChat() {
     useEffect(() => {
         loadThreads();
         getPushPermissionState().then(setPushState);
-        const interval = setInterval(loadThreads, 10000);
-        return () => clearInterval(interval);
     }, []);
+    usePolling(loadThreads, 10000); // paused while the tab is hidden
 
     useEffect(() => {
         if (!activeId) return;
         loadMessages(activeId);
-        const interval = setInterval(() => loadMessages(activeId), 5000);
-        return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeId]);
+    usePolling(() => { if (activeId) loadMessages(activeId); }, 5000, [activeId]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
