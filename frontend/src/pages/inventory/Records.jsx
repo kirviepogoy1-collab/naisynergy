@@ -4,7 +4,6 @@ import { Trash2, Download, Plus, FileText, Search, Pencil } from 'lucide-react';
 import Layout from '../../components/Layout';
 import Modal from '../../components/Modal';
 import Pagination from '../../components/Pagination';
-import usePagination from '../../hooks/usePagination';
 import api from '../../api/axios';
 import useDebouncedValue, { useLatestSignal, isCanceled } from '../../hooks/useDebouncedValue';
 import { useAuth } from '../../context/AuthContext';
@@ -33,7 +32,11 @@ export default function Records() {
     const [showManage, setShowManage] = useState(false);
     const [lookup, setLookup] = useState({ suppliers: [], categories: [] });
     const fileRef = useRef();
-    const { pageItems: pagedRecords, page, setPage, totalPages } = usePagination(records, 15);
+    // Server-side paging: the backend returns only the current page of 15, plus the total.
+    const PAGE_SIZE = 15;
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
 
     async function loadLookup() {
         try {
@@ -68,10 +71,12 @@ export default function Records() {
     async function load() {
         try {
             const [recordsRes, statsRes] = await Promise.all([
-                api.get('/records', { params: { search: debouncedSearch, category, start_date: startDate, end_date: endDate }, signal: nextSignal() }),
+                api.get('/records', { params: { search: debouncedSearch, category, start_date: startDate, end_date: endDate, page, limit: PAGE_SIZE }, signal: nextSignal() }),
                 api.get('/records/stats/summary')
             ]);
-            setRecords(recordsRes.data);
+            setRecords(recordsRes.data.rows);
+            setTotal(recordsRes.data.total);
+            if (recordsRes.data.page !== page) setPage(recordsRes.data.page); // e.g. deleted the last row of the last page
             setStats(statsRes.data);
         } catch (err) {
             if (!isCanceled(err)) throw err;
@@ -94,7 +99,16 @@ export default function Records() {
         window.open(buildExportUrl(), '_blank');
     }
 
-    useEffect(() => { load(); }, [debouncedSearch, category, startDate, endDate]);
+    // Changing a filter jumps back to page 1; changing the page just loads that page.
+    const filterKey = [debouncedSearch, category, startDate, endDate].join('|');
+    const prevFilterKey = useRef(filterKey);
+    useEffect(() => {
+        if (prevFilterKey.current !== filterKey) {
+            prevFilterKey.current = filterKey;
+            if (page !== 1) { setPage(1); return; }
+        }
+        load();
+    }, [filterKey, page]);
     useEffect(() => { loadLookup(); }, []);
 
     function resetForm() {
@@ -350,14 +364,14 @@ export default function Records() {
                         </tr>
                     </thead>
                     <tbody>
-                        {pagedRecords.map((r, index) => (
+                        {records.map((r, index) => (
                             <tr key={r.id} className="border-b hover:bg-brand-50">
                                 {canManage && (
                                     <td className="py-2 px-3">
                                         <input type="checkbox" checked={selected.includes(r.id)} onChange={() => toggleSelect(r.id)} />
                                     </td>
                                 )}
-                                <td className="py-2 px-3 whitespace-nowrap">{(page - 1) * 15 + index + 1}</td>
+                                <td className="py-2 px-3 whitespace-nowrap">{(page - 1) * PAGE_SIZE + index + 1}</td>
                                 <td className="py-2 px-3 whitespace-nowrap font-semibold text-brand-700">{r.item_name}</td>
                                 <td className="py-2 px-3 whitespace-nowrap text-gray-600">{r.asset_codes || '—'}</td>
                                 <td className="py-2 px-3 whitespace-nowrap">{r.category || '—'}</td>
@@ -391,7 +405,7 @@ export default function Records() {
                         )}
                     </tbody>
                 </table>
-                <Pagination page={page} totalPages={totalPages} totalItems={records.length} pageSize={15} onPageChange={setPage} />
+                <Pagination page={page} totalPages={totalPages} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} />
             </div>
         </Layout>
     );

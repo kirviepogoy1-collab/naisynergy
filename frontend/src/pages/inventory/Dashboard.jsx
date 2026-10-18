@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import api from '../../api/axios';
@@ -13,23 +13,32 @@ export default function InventoryDashboard() {
     const [status, setStatus] = useState('');
     const [results, setResults] = useState([]);
     const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
     const PAGE_SIZE = 10;
 
     useEffect(() => {
         api.get('/inventory/summary').then((res) => setSummary(res.data));
     }, []);
 
+    // Server-side paging: the backend returns only the current page of 10, plus the total.
+    // Changing a filter jumps back to page 1; changing the page just loads that page.
+    const filterKey = [debouncedSearch, status].join('|');
+    const prevFilterKey = useRef(filterKey);
     useEffect(() => {
-        api.get('/inventory', { params: { search: debouncedSearch, status }, signal: nextSignal() })
+        if (prevFilterKey.current !== filterKey) {
+            prevFilterKey.current = filterKey;
+            if (page !== 1) { setPage(1); return; }
+        }
+        api.get('/inventory', { params: { search: debouncedSearch, status, page, limit: PAGE_SIZE }, signal: nextSignal() })
             .then((res) => {
-                setResults(res.data);
-                setPage(1);
+                setResults(res.data.rows);
+                setTotal(res.data.total);
+                if (res.data.page !== page) setPage(res.data.page);
             })
             .catch((err) => { if (!isCanceled(err)) throw err; });
-    }, [debouncedSearch, status]);
+    }, [filterKey, page]);
 
-    const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
-    const pageResults = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     function handleAssetRowClick(assetName) {
         navigate(`/inventory/asset-summary?search=${encodeURIComponent(assetName)}`);
@@ -116,7 +125,7 @@ export default function InventoryDashboard() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {pageResults.map((r) => (
+                                {results.map((r) => (
                                     <tr key={r.id} className="border-b hover:bg-brand-50 cursor-pointer" onClick={() => handleAssetRowClick(r.asset_name)}>
                                         <td className="py-2 px-3">{r.asset_code}</td>
                                         <td className="py-2 px-3 font-semibold text-brand-700">{r.asset_name}</td>

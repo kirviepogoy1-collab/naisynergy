@@ -30,6 +30,13 @@ const migrationsReady = (async () => {
         // (and remove the purchase record entirely if that brings it to 0),
         // instead of guessing which purchase a deleted item belonged to.
         await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS records_id INT NULL REFERENCES records(id) ON DELETE SET NULL');
+        // Units this row added to its Purchase Record, frozen at the moment it was
+        // logged. Deleting/restoring uses THIS number instead of the row's current
+        // counts, so editing Working/Repair/etc. later can't make a delete take back
+        // a different amount than was added. Rows logged before this column existed
+        // are filled in once from their current total.
+        await pool.query('ALTER TABLE inventory ADD COLUMN IF NOT EXISTS logged_qty INT NOT NULL DEFAULT 0');
+        await pool.query('UPDATE inventory SET logged_qty = GREATEST(total, 1) WHERE purchase_logged = TRUE AND logged_qty = 0');
         // Persisted (not just used-once-at-creation-and-forgotten) so "Generate
         // Items" can copy them into a new room's placeholder row, and so a price
         // added later via edit has something to log the purchase record with.
@@ -52,6 +59,8 @@ const migrationsReady = (async () => {
                 outcome VARCHAR(20) NULL
             )`);
         await pool.query('CREATE INDEX IF NOT EXISTS idx_repair_units_open ON inventory_repair_units(inventory_id) WHERE resolved_at IS NULL');
+        // Purchase Records look up their items by records_id (asset codes column + search).
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_inventory_records_id ON inventory(records_id)');
     } catch (err) {
         console.error('Failed to migrate inventory table:', err.message);
     }
@@ -89,35 +98,43 @@ async function upsertPurchaseRecord({ itemName, qty, purchaseDate, price, suppli
     return r.insertId;
 }
 
-// GET /api/inventory - list assets, optional filters (room_code, search, status)
+// GET /api/inventory - list assets, optional filters (room_code, search, status).
+// With ?page=N&limit=M it returns ONE page as { rows, total, page, limit } (page is
+// clamped to the last one that exists). Without ?page it returns a plain array, as
+// before (a single room is small; an all-rooms list is capped at 300 as a safety valve).
 router.get('/', asyncHandler(async (req, res) => {
     const { room_code, search, status } = req.query;
-    let sql = `
-        SELECT inv.*, r.room_name, r.building,
-               (SELECT COUNT(*) FROM inventory_comments c WHERE c.item_id = inv.id) AS comment_count
-        FROM inventory inv
-        JOIN rooms r ON inv.room_code = r.room_code
-        WHERE inv.deleted_at IS NULL
-    `;
+    let where = ' WHERE inv.deleted_at IS NULL';
     const params = [];
     if (room_code) {
-        sql += ' AND inv.room_code = ?';
+        where += ' AND inv.room_code = ?';
         params.push(room_code);
     }
     if (search) {
-        sql += ' AND (inv.asset_name ILIKE ? OR inv.asset_code ILIKE ? OR inv.description ILIKE ?)';
+        where += ' AND (inv.asset_name ILIKE ? OR inv.asset_code ILIKE ? OR inv.description ILIKE ?)';
         params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
-    if (status === 'working') sql += ' AND inv.working > 0';
-    if (status === 'for_repair') sql += ' AND inv.for_repair > 0';
-    if (status === 'non_working') sql += ' AND inv.non_working > 0';
-    if (status === 'salvage') sql += ' AND inv.salvage > 0';
+    if (status === 'working') where += ' AND inv.working > 0';
+    if (status === 'for_repair') where += ' AND inv.for_repair > 0';
+    if (status === 'non_working') where += ' AND inv.non_working > 0';
+    if (status === 'salvage') where += ' AND inv.salvage > 0';
 
-    sql += ' ORDER BY inv.room_code, inv.asset_code';
-    // A single room is naturally small, but a search across ALL rooms with an
-    // empty/short term could return the whole table - cap it as a safety valve.
-    if (!room_code) sql += ' LIMIT 300';
-    const [rows] = await pool.query(sql, params);
+    const from = `FROM inventory inv JOIN rooms r ON inv.room_code = r.room_code${where}`;
+    const select = `SELECT inv.*, r.room_name, r.building,
+               (SELECT COUNT(*) FROM inventory_comments c WHERE c.item_id = inv.id) AS comment_count`;
+    const order = ' ORDER BY inv.room_code, inv.asset_code';
+
+    if (req.query.page !== undefined) {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+        const [countRows] = await pool.query(`SELECT COUNT(*)::int AS n ${from}`, params);
+        const total = countRows[0].n;
+        const lastPage = Math.max(Math.ceil(total / limit), 1);
+        const page = Math.min(Math.max(parseInt(req.query.page, 10) || 1, 1), lastPage);
+        const [rows] = await pool.query(`${select} ${from}${order} LIMIT ? OFFSET ?`, [...params, limit, (page - 1) * limit]);
+        return res.json({ rows, total, page, limit });
+    }
+
+    const [rows] = await pool.query(`${select} ${from}${order}${room_code ? '' : ' LIMIT 300'}`, params);
     res.json(rows);
 }));
 
@@ -475,14 +492,15 @@ router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
             }
             const inserted = insertedIds.length;
             // One purchase record for the whole batch, quantity = per-room units x rooms actually inserted.
-            const newRecordsId = await upsertPurchaseRecord({
-                itemName: asset_name, qty: Math.max(perRoomQty * inserted, 1), purchaseDate: purchase_date,
-                price, supplier, category, receiptPath
-            });
+            const unitsPerRow = Math.max(perRoomQty, 1);
             if (insertedIds.length > 0) {
+                const newRecordsId = await upsertPurchaseRecord({
+                    itemName: asset_name, qty: unitsPerRow * inserted, purchaseDate: purchase_date,
+                    price, supplier, category, receiptPath
+                });
                 await pool.query(
-                    `UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id IN (${insertedIds.map(() => '?').join(',')})`,
-                    [newRecordsId, ...insertedIds]
+                    `UPDATE inventory SET purchase_logged = TRUE, records_id = ?, logged_qty = ? WHERE id IN (${insertedIds.map(() => '?').join(',')})`,
+                    [newRecordsId, unitsPerRow, ...insertedIds]
                 );
             }
             logActivity(req.user.id, 'asset_create', null, `Added ${asset_name} (${asset_code}) to ${inserted} room(s)`, 'inventory');
@@ -501,11 +519,12 @@ router.post('/', receiptUpload.single('receipt_image'), async (req, res) => {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [room_code, asset_code, asset_name, ...values]
         );
+        const unitsLogged = Math.max(perRoomQty, 1);
         const newRecordsId = await upsertPurchaseRecord({
-            itemName: asset_name, qty: Math.max(perRoomQty, 1), purchaseDate: purchase_date,
+            itemName: asset_name, qty: unitsLogged, purchaseDate: purchase_date,
             price, supplier, category, receiptPath
         });
-        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [newRecordsId, result.insertId]);
+        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ?, logged_qty = ? WHERE id = ?', [newRecordsId, unitsLogged, result.insertId]);
 
         logActivity(req.user.id, 'asset_create', null, `Added ${asset_name} (${asset_code}) to room ${room_code}`, 'inventory');
         res.status(201).json({ message: 'Asset added.', id: result.insertId });
@@ -575,13 +594,14 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
         );
 
         if (newPrice > 0 && unloggedIds.length > 0) {
+            const unitsPerRow = Math.max(perRoomQty, 1);
             const newRecordsId = await upsertPurchaseRecord({
-                itemName: asset_name, qty: Math.max(perRoomQty * unloggedIds.length, 1), purchaseDate: purchase_date,
+                itemName: asset_name, qty: unitsPerRow * unloggedIds.length, purchaseDate: purchase_date,
                 price: newPrice, supplier, category, receiptPath
             });
             await pool.query(
-                `UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id IN (${unloggedIds.map(() => '?').join(',')})`,
-                [newRecordsId, ...unloggedIds]
+                `UPDATE inventory SET purchase_logged = TRUE, records_id = ?, logged_qty = ? WHERE id IN (${unloggedIds.map(() => '?').join(',')})`,
+                [newRecordsId, unitsPerRow, ...unloggedIds]
             );
         }
 
@@ -622,11 +642,12 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
 
     // First time this specific row gets a real price — log it once, then never again.
     if (newPrice > 0 && rows[0].purchase_logged !== true) {
+        const unitsLogged = Math.max(perRoomQty, 1);
         const newRecordsId = await upsertPurchaseRecord({
-            itemName: asset_name, qty: Math.max(perRoomQty, 1), purchaseDate: purchase_date,
+            itemName: asset_name, qty: unitsLogged, purchaseDate: purchase_date,
             price: newPrice, supplier, category, receiptPath
         });
-        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ? WHERE id = ?', [newRecordsId, req.params.id]);
+        await pool.query('UPDATE inventory SET purchase_logged = TRUE, records_id = ?, logged_qty = ? WHERE id = ?', [newRecordsId, unitsLogged, req.params.id]);
     }
 
     logActivity(req.user.id, 'asset_update', null, `Updated ${asset_name} (${rows[0].asset_code})`, 'inventory');
@@ -643,6 +664,11 @@ router.put('/:id', receiptUpload.single('receipt_image'), asyncHandler(async (re
 // no records_id (records_id IS NULL) and are silently skipped — nothing to
 // deduct from. Restoring the item from Trash puts its units back into a
 // matching Purchase Record (see POST /:id/restore below).
+function loggedUnits(row) {
+    const q = Number(row.logged_qty);
+    return q > 0 ? q : Math.max(Number(row.total) || 0, 1);
+}
+
 async function deductFromPurchaseRecord(recordsId, qty) {
     if (!recordsId || !qty) return;
     const [rows] = await pool.query('SELECT quantity FROM records WHERE id = ?', [recordsId]);
@@ -678,7 +704,7 @@ async function resolveRecordsId(row) {
 }
 
 router.delete('/:id', asyncHandler(async (req, res) => {
-    const [rows] = await pool.query(`SELECT asset_code, records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged FROM inventory WHERE id = ? AND deleted_at IS NULL`, [req.params.id]);
+    const [rows] = await pool.query(`SELECT asset_code, records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged, logged_qty FROM inventory WHERE id = ? AND deleted_at IS NULL`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Asset not found.' });
 
     if (req.query.delete_across_all_rooms === '1') {
@@ -687,14 +713,14 @@ router.delete('/:id', asyncHandler(async (req, res) => {
         // purchase batches (bought 3 in January, 2 more in March, say) — each
         // batch's record gets deducted only by the rooms that actually came from it.
         const [affected] = await pool.query(
-            `SELECT records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged FROM inventory WHERE asset_code = ? AND deleted_at IS NULL`,
+            `SELECT records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged, logged_qty FROM inventory WHERE asset_code = ? AND deleted_at IS NULL`,
             [rows[0].asset_code]
         );
         const deductions = {};
         for (const r of affected) {
             const rid = await resolveRecordsId(r);
             if (!rid) continue;
-            deductions[rid] = (deductions[rid] || 0) + Math.max(Number(r.total) || 0, 1);
+            deductions[rid] = (deductions[rid] || 0) + loggedUnits(r);
         }
 
         const [result] = await pool.query(
@@ -709,8 +735,8 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     }
 
     await pool.query('UPDATE inventory SET deleted_at = NOW(), deleted_by = ? WHERE id = ?', [req.user.id, req.params.id]);
-    // At least 1 unit: creation logs Math.max(units, 1), so deletion must take back the same minimum.
-    await deductFromPurchaseRecord(await resolveRecordsId(rows[0]), Math.max(Number(rows[0].total) || 0, 1));
+    // Takes back exactly what this row added when it was logged (see loggedUnits).
+    await deductFromPurchaseRecord(await resolveRecordsId(rows[0]), loggedUnits(rows[0]));
     logActivity(req.user.id, 'asset_delete', null, `Moved asset ${rows[0].asset_code} to Trash`, 'inventory');
     res.json({ message: 'Asset moved to Trash. It can be restored within 30 days.' });
 }));
@@ -725,7 +751,7 @@ router.post('/bulk-delete', asyncHandler(async (req, res) => {
     // Grab each row's records_id/total BEFORE soft-deleting so the Purchase Records
     // can be reduced the same way a single delete does.
     const [affected] = await pool.query(
-        `SELECT records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged FROM inventory WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+        `SELECT records_id, total, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date, supplier, category, purchase_logged, logged_qty FROM inventory WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
         ids
     );
     await pool.query(
@@ -736,7 +762,7 @@ router.post('/bulk-delete', asyncHandler(async (req, res) => {
     for (const r of affected) {
         const rid = await resolveRecordsId(r);
         if (!rid) continue;
-        deductions[rid] = (deductions[rid] || 0) + Math.max(Number(r.total) || 0, 1);
+        deductions[rid] = (deductions[rid] || 0) + loggedUnits(r);
     }
     for (const [recordsId, qty] of Object.entries(deductions)) {
         await deductFromPurchaseRecord(Number(recordsId), qty);
@@ -775,7 +801,7 @@ router.get('/trash', requireRole('superadmin', 'inventory_staff'), asyncHandler(
 router.post('/:id/restore', requireRole('superadmin', 'inventory_staff'), asyncHandler(async (req, res) => {
     const [rows] = await pool.query(
         `SELECT asset_code, asset_name, purchase_price, to_char(purchase_date, 'YYYY-MM-DD') AS purchase_date,
-                supplier, category, receipt_image, purchase_logged, total
+                supplier, category, receipt_image, purchase_logged, total, logged_qty
          FROM inventory WHERE id = ? AND deleted_at IS NOT NULL`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Trashed asset not found (it may have already been purged or restored).' });
 
@@ -787,7 +813,7 @@ router.post('/:id/restore', requireRole('superadmin', 'inventory_staff'), asyncH
     const item = rows[0];
     if (item.purchase_logged === true && Number(item.purchase_price) > 0) {
         const newRecordsId = await upsertPurchaseRecord({
-            itemName: item.asset_name, qty: Math.max(Number(item.total) || 0, 1), purchaseDate: item.purchase_date,
+            itemName: item.asset_name, qty: loggedUnits(item), purchaseDate: item.purchase_date,
             price: Number(item.purchase_price), supplier: item.supplier, category: item.category, receiptPath: item.receipt_image
         });
         await pool.query('UPDATE inventory SET records_id = ? WHERE id = ?', [newRecordsId, req.params.id]);

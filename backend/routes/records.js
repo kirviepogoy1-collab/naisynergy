@@ -17,23 +17,45 @@ const ASSET_CODES_SQL = `(SELECT string_agg(DISTINCT i.asset_code, ', ' ORDER BY
 const SEARCH_SQL = `(r.item_name ILIKE ? OR r.supplier ILIKE ? OR r.category ILIKE ?
                      OR EXISTS (SELECT 1 FROM inventory i WHERE i.records_id = r.id AND i.deleted_at IS NULL AND i.asset_code ILIKE ?))`;
 
-// GET /api/records - list, with optional search + date range filters
-router.get('/', asyncHandler(async (req, res) => {
-    const { search, category, start_date, end_date } = req.query;
-    let sql = `SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes FROM records r WHERE 1=1`;
+// WHERE fragment (and its params) shared by the list and the CSV export.
+function buildFilters({ search, category, start_date, end_date }) {
+    let where = '';
     const params = [];
     if (search) {
-        sql += ` AND ${SEARCH_SQL}`;
+        where += ` AND ${SEARCH_SQL}`;
         params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (category) {
-        sql += ' AND r.category = ?';
+        where += ' AND r.category = ?';
         params.push(category);
     }
-    if (start_date) { sql += ' AND r.purchase_date >= ?'; params.push(start_date); }
-    if (end_date) { sql += ' AND r.purchase_date <= ?'; params.push(end_date); }
-    sql += ' ORDER BY r.purchase_date DESC, r.id DESC';
-    const [rows] = await pool.query(sql, params);
+    if (start_date) { where += ' AND r.purchase_date >= ?'; params.push(start_date); }
+    if (end_date) { where += ' AND r.purchase_date <= ?'; params.push(end_date); }
+    return { where, params };
+}
+
+// GET /api/records - list, with optional search + date range filters.
+// With ?page=N&limit=M it returns ONE page as { rows, total, page, limit } (the page
+// is clamped to the last one that exists); without ?page it returns every matching
+// row as a plain array, as before.
+router.get('/', asyncHandler(async (req, res) => {
+    const { where, params } = buildFilters(req.query);
+    const base = `FROM records r WHERE 1=1${where}`;
+    const order = ' ORDER BY r.purchase_date DESC, r.id DESC';
+
+    if (req.query.page !== undefined) {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 100);
+        const [countRows] = await pool.query(`SELECT COUNT(*)::int AS n ${base}`, params);
+        const total = countRows[0].n;
+        const lastPage = Math.max(Math.ceil(total / limit), 1);
+        const page = Math.min(Math.max(parseInt(req.query.page, 10) || 1, 1), lastPage);
+        const [rows] = await pool.query(
+            `SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes ${base}${order} LIMIT ? OFFSET ?`,
+            [...params, limit, (page - 1) * limit]);
+        return res.json({ rows, total, page, limit });
+    }
+
+    const [rows] = await pool.query(`SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes ${base}${order}`, params);
     res.json(rows);
 }));
 
@@ -101,21 +123,8 @@ router.get('/stats/summary', asyncHandler(async (req, res) => {
 
 // GET /api/records/export - CSV export with grand total row
 router.get('/export', asyncHandler(async (req, res) => {
-    const { search, category, start_date, end_date } = req.query;
-    let sql = `SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes FROM records r WHERE 1=1`;
-    const params = [];
-    if (search) {
-        sql += ` AND ${SEARCH_SQL}`;
-        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-    }
-    if (category) {
-        sql += ' AND r.category = ?';
-        params.push(category);
-    }
-    if (start_date) { sql += ' AND r.purchase_date >= ?'; params.push(start_date); }
-    if (end_date) { sql += ' AND r.purchase_date <= ?'; params.push(end_date); }
-    sql += ' ORDER BY r.purchase_date DESC';
-
+    const { where, params } = buildFilters(req.query);
+    const sql = `SELECT r.*, ${ASSET_CODES_SQL} AS asset_codes FROM records r WHERE 1=1${where} ORDER BY r.purchase_date DESC`;
     const [rows] = await pool.query(sql, params);
     const header = ['Item Name', 'Asset Code', 'Quantity', 'Purchase Date', 'Unit Price', 'Supplier', 'Category', 'Line Total'];
     const csvRows = ['\uFEFF' + header.join(',')]; // UTF-8 BOM so peso signs/accents show right in Excel
